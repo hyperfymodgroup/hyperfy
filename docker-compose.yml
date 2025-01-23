@@ -6,8 +6,8 @@ services:
     container_name: ${COOLIFY_APP_NAME:-hyperfy}
     restart: unless-stopped
     environment:
-      - WORLD=world
-      - PORT=3000
+      - WORLD=${WORLD:-world}
+      - PORT=${PORT:-3000}
       - JWT_SECRET=${JWT_SECRET:-hyper}
       - ADMIN_CODE=${ADMIN_CODE:-}
       - SAVE_INTERVAL=60
@@ -19,7 +19,7 @@ services:
     ports:
       - ${COOLIFY_PORT_80:-80}:80
       - ${COOLIFY_PORT_443:-443}:443
-      - ${COOLIFY_PORT_3011:-3011}:3011
+      - ${COOLIFY_PORT_3000:-3000}:3000
     volumes:
       - ${COOLIFY_VOLUME_APP:-app_data}:/app/data
       - ${COOLIFY_VOLUME_ASSETS:-app_assets}:/app/assets
