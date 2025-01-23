@@ -7,6 +7,7 @@ import { InspectPane } from './InspectPane'
 import { CodePane } from './CodePane'
 import { AvatarPane } from './AvatarPane'
 import { ChatBox } from './ChatBox'
+import { HyperFone } from './HyperFone'
 import { useElemSize } from './useElemSize'
 
 export function GUI({ world }) {
@@ -33,6 +34,7 @@ function Content({ world, width, height }) {
   const [chat, setChat] = useState(() => !touch)
   const [avatar, setAvatar] = useState(null)
   const [disconnected, setDisconnected] = useState(false)
+
   useEffect(() => {
     world.on('context', setContext)
     world.on('inspect', setInspect)
@@ -47,6 +49,7 @@ function Content({ world, width, height }) {
       world.off('disconnect', setDisconnected)
     }
   }, [])
+
   return (
     <>
       {!chat && (
@@ -77,6 +80,9 @@ function Content({ world, width, height }) {
           onClose={() => setChat(false)}
         />
       )}
+
+      <HyperFone world={world} user={world.user} setUser={(user) => world.setUser(user)} />
+      
       {context && <ContextWheel key={context.id} {...context} />}
       {inspect && <InspectPane key={inspect.data.id} world={world} entity={inspect} />}
       {code && <CodePane world={world} entity={code} />}
