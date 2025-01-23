@@ -8,6 +8,8 @@ import { CodePane } from './CodePane'
 import { AvatarPane } from './AvatarPane'
 import { ChatBox } from './ChatBox'
 import { useElemSize } from './useElemSize'
+import { HyperFone } from './HyperFone'
+import { AuthProvider } from './AuthProvider'
 
 export function GUI({ world }) {
   const [ref, width, height] = useElemSize()
@@ -49,6 +51,10 @@ function Content({ world, width, height }) {
   }, [])
   return (
     <>
+      <AuthProvider>
+        <HyperFone world={world} />
+      </AuthProvider>
+
       {!chat && (
         <ChatBtn
           css={css`

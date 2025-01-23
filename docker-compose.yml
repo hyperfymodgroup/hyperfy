@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  app:
+    image: howieduhzit/hyperfy-docker:main
+    container_name: ${COOLIFY_APP_NAME:-hyperfy}
+    restart: unless-stopped
+    environment:
+      - WORLD=world
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-hyper}
+      - ADMIN_CODE=${ADMIN_CODE:-}
+      - SAVE_INTERVAL=60
+      - PUBLIC_MAX_UPLOAD_SIZE=12
+      - PUBLIC_WS_URL=${PUBLIC_WS_URL:-http://localhost:3000/ws}
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:3000/api}
+      - PUBLIC_ASSETS_URL=${PUBLIC_ASSETS_URL:-http://localhost:3000/assets}
+      - NODE_ENV=${NODE_ENV:-production}
+    ports:
+      - ${COOLIFY_PORT_80:-80}:80
+      - ${COOLIFY_PORT_443:-443}:443
+      - ${COOLIFY_PORT_3011:-3011}:3011
+    volumes:
+      - ${COOLIFY_VOLUME_APP:-app_data}:/app/data
+      - ${COOLIFY_VOLUME_ASSETS:-app_assets}:/app/assets
+    networks:
+      - ${COOLIFY_NETWORK:-coolify-infra}
+    labels:
+      coolify.managed: "true"
+
+networks:
+  coolify-infra:
+    external: ${COOLIFY_NETWORK_EXTERNAL:-true}
+
+volumes:
+  app_data:
+    name: ${COOLIFY_VOLUME_APP:-hyperfy_app_data}
+  app_assets:
+    name: ${COOLIFY_VOLUME_ASSETS:-hyperfy_app_assets} 
