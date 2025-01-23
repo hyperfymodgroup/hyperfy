@@ -15,8 +15,8 @@ export function AppStore({ theme, installedApps, onInstallApp, onUninstallApp })
       setLoading(true)
       setError(null)
       
-      // Fetch the apps directory contents from GitHub
-      const response = await fetch('https://api.github.com/repos/HowieDuhzit/HyperFone_Apps/contents/')
+      // Fetch the apps directory contents from local API
+      const response = await fetch('/api/apps/list')
       const data = await response.json()
       
       // Process each app file
