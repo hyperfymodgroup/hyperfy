@@ -365,4 +365,3 @@ function formatSize(bytes) {
   }
   return `${Math.round(size * 10) / 10} ${units[unit]}`
 } 
-} 
