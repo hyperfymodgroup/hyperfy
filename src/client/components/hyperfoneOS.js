@@ -4,11 +4,9 @@ import { themes, defaultWallpaper } from './hyperfone_core/themes'
 // Core OS functionality
 export class HyperFoneOS {
   constructor() {
-    // Clear existing data
-    localStorage.removeItem('hyperfy_installed_apps')
-    localStorage.removeItem('hyperfy_home_layout')
-    
-    this.state = {
+    // Initialize with default state
+    const defaultState = {
+      version: '1.1.0', // Add version number
       isLocked: true,
       activeApp: null,
       batteryLevel: 100,
@@ -19,87 +17,62 @@ export class HyperFoneOS {
       customThemes: {},
       customWallpapers: {},
       isDarkMode: true,
-      hiddenApps: ['settings'],
+      hiddenApps: [],
       isDeveloperMode: false,
       showWorldInspector: false,
       showObjectBounds: false,
       showPerformanceStats: false,
-      installedApps: {
-        settings: {
-          id: 'settings',
-          name: 'Settings',
-          icon: '⚙️',
-          isSystem: true
-        },
-        developer: {
-          id: 'developer',
-          name: 'Developer',
-          icon: '🛠️',
-          isSystem: true
-        },
-        wallet: {
-          id: 'wallet',
-          name: 'Wallet',
-          icon: '👛',
-          isSystem: true
-        },
-        chat: {
-          id: 'chat',
-          name: 'Chat',
-          icon: '💬',
-          isSystem: true
-        },
-        inventory: {
-          id: 'inventory',
-          name: 'Inventory',
-          icon: '🎒',
-          isSystem: true
-        },
-        appstore: {
-          id: 'appstore',
-          name: 'App Store',
-          icon: '🏪',
-          isSystem: true
-        },
-        browser: {
-          id: 'browser',
-          name: 'Browser',
-          icon: '🌐',
-          isSystem: true
-        },
-        screenshare: {
-          id: 'screenshare',
-          name: 'Screen Share',
-          icon: '📱',
-          isSystem: true
-        }
-      },
-      homeScreenLayout: {
-        currentPage: 'main',
-        pages: [
-          {
-            id: 'main',
-            name: 'Main',
-            apps: ['wallet', 'chat', 'inventory', 'appstore', 'browser', 'screenshare']
-          }
-        ]
-      }
+      showTerminal: false,
+      installedApps: this.loadInstalledApps(),
+      homeScreenLayout: this.loadHomeScreenLayout()
     }
 
-    // Load saved state
+    // Load saved state or use default
     const savedState = localStorage.getItem('hyperfy_os_state')
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState)
-        this.state = {
-          ...this.state,
-          ...parsed,
-          currentTime: new Date()
+        
+        // Check version and migrate if needed
+        if (!parsed.version || parsed.version < '1.1.0') {
+          // Clear saved state to force reload with new apps
+          localStorage.removeItem('hyperfy_os_state')
+          localStorage.removeItem('hyperfy_installed_apps')
+          localStorage.removeItem('hyperfy_home_layout')
+          this.state = defaultState
+        } else {
+          this.state = {
+            ...defaultState,
+            ...parsed,
+            currentTime: new Date(),
+            // Ensure critical apps are always installed
+            installedApps: {
+              ...defaultState.installedApps,
+              ...parsed.installedApps
+            },
+            // Ensure apps are in the layout
+            homeScreenLayout: {
+              currentPage: 'main',
+              pages: [
+                {
+                  id: 'main',
+                  name: 'Main',
+                  apps: ['wallet', 'chat', 'inventory', 'appstore', 'browser', 'screenshare', 'meshy', 'fileexplorer']
+                }
+              ]
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to load saved state:', err)
+        this.state = defaultState
       }
+    } else {
+      this.state = defaultState
     }
+
+    // Save initial state
+    this.saveState()
 
     // Start time update interval
     setInterval(() => {
@@ -123,8 +96,7 @@ export class HyperFoneOS {
 
   // Load saved data from localStorage
   loadInstalledApps() {
-    const saved = localStorage.getItem('hyperfy_installed_apps')
-    return saved ? JSON.parse(saved) : {
+    const defaultApps = {
       'settings': {
         id: 'settings',
         name: 'Settings',
@@ -166,22 +138,59 @@ export class HyperFoneOS {
         name: 'Screen Share',
         icon: '📱',
         isSystem: true
+      },
+      'meshy': {
+        id: 'meshy',
+        name: 'Meshy 3D',
+        icon: '🎨',
+        isSystem: true
+      },
+      'fileexplorer': {
+        id: 'fileexplorer',
+        name: 'File Explorer',
+        icon: '📂',
+        isSystem: true
       }
     }
+
+    const saved = localStorage.getItem('hyperfy_installed_apps')
+    if (saved) {
+      const savedApps = JSON.parse(saved)
+      return {
+        ...defaultApps,
+        ...savedApps
+      }
+    }
+    return defaultApps
   }
 
   loadHomeScreenLayout() {
-    const saved = localStorage.getItem('hyperfy_home_layout')
-    return saved ? JSON.parse(saved) : {
+    const defaultLayout = {
       pages: [
         {
           id: 'main',
           name: 'Main',
-          apps: ['appstore', 'settings', 'wallet', 'chat', 'browser', 'inventory', 'screenshare']
+          apps: ['appstore', 'settings', 'wallet', 'chat', 'browser', 'inventory', 'screenshare', 'meshy', 'fileexplorer']
         }
       ],
       currentPage: 'main'
     }
+
+    const saved = localStorage.getItem('hyperfy_home_layout')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        // Ensure fileexplorer is included in the layout
+        if (!parsed.pages[0].apps.includes('fileexplorer')) {
+          parsed.pages[0].apps.push('fileexplorer')
+          localStorage.setItem('hyperfy_home_layout', JSON.stringify(parsed))
+        }
+        return parsed
+      } catch (err) {
+        return defaultLayout
+      }
+    }
+    return defaultLayout
   }
 
   loadHiddenApps() {

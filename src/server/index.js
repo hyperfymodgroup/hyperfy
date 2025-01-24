@@ -13,6 +13,7 @@ import statics from '@fastify/static'
 import multipart from '@fastify/multipart'
 
 import { loadPhysX } from './physx/loadPhysX'
+import terminalHandler from './api/terminal.js'
 
 import { createServerWorld } from '../core/createServerWorld'
 import { hashFile } from '../core/utils-server'
@@ -65,6 +66,9 @@ fastify.register(multipart, {
 })
 fastify.register(ws)
 fastify.register(worldNetwork)
+
+// Register API routes
+fastify.post('/api/terminal', terminalHandler)
 
 const publicEnvs = {}
 for (const key in process.env) {

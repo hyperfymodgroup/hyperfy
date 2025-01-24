@@ -4,6 +4,7 @@ import { themes, defaultWallpaper } from './themes'
 import { hyperFoneOS } from '../hyperfoneOS'
 import { useAuthContext } from '../../components/AuthProvider'
 import { createClient } from 'matrix-js-sdk'
+import { DeveloperApp } from './DeveloperApp'
 
 // Add developer mode state
 const DEVELOPER_MODE_TAPS = 7
@@ -27,7 +28,8 @@ export function Settings({
   setIsOpen,
   handleOpenClose,
   animationSettings,
-  setAnimationSettings
+  setAnimationSettings,
+  world
 }) {
   const { user, status, connectWallet, disconnectWallet, SUPPORTED_WALLETS } = useAuthContext()
   const [activeSection, setActiveSection] = useState('general')
@@ -183,6 +185,7 @@ export function Settings({
       if (newTaps === DEVELOPER_MODE_TAPS) {
         setIsDeveloperMode(true)
         hyperFoneOS.setState({ isDeveloperMode: true })
+        localStorage.setItem('hyperfy_developer_mode', 'true')
         return 0
       }
       return newTaps
@@ -195,7 +198,9 @@ export function Settings({
 
   // Load developer mode state
   useEffect(() => {
-    setIsDeveloperMode(hyperFoneOS.state.isDeveloperMode || false)
+    const savedDevMode = localStorage.getItem('hyperfy_developer_mode') === 'true'
+    setIsDeveloperMode(savedDevMode)
+    hyperFoneOS.setState({ isDeveloperMode: savedDevMode })
   }, [])
 
   // Add developer mode section to sections array
@@ -2001,6 +2006,7 @@ export function Settings({
                 padding: 15px;
                 border-bottom: 1px solid ${theme.border}22;
                 gap: 12px;
+                position: relative;
                 
                 &:last-child {
                   border-bottom: none;
@@ -2024,8 +2030,19 @@ export function Settings({
                 <div css={css`
                   color: ${theme.textSecondary};
                   font-size: 14px;
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
                 `}>
                   {systemInfo.buildNumber}
+                  {buildTaps > 0 && (
+                    <span css={css`
+                      color: ${theme.primary};
+                      font-size: 12px;
+                    `}>
+                      {DEVELOPER_MODE_TAPS - buildTaps} more taps
+                    </span>
+                  )}
                 </div>
               </div>
             </SettingGroup>
@@ -2063,31 +2080,32 @@ export function Settings({
             flex-direction: column;
             gap: 20px;
           `}>
-            <SettingGroup title="Developer Options" theme={theme}>
-              <SettingToggle
-                icon="🔍"
-                title="Show World Inspector"
-                description="Display hierarchy and details of world objects"
-                value={hyperFoneOS.state.showWorldInspector}
-                onChange={(value) => hyperFoneOS.setState({ showWorldInspector: value })}
-                theme={theme}
-              />
-              <SettingToggle
-                icon="🎯"
-                title="Show Object Bounds"
-                description="Display bounding boxes around objects"
-                value={hyperFoneOS.state.showObjectBounds}
-                onChange={(value) => hyperFoneOS.setState({ showObjectBounds: value })}
-                theme={theme}
-              />
+            <SettingGroup title="Developer Tools" theme={theme}>
               <SettingToggle
                 icon="📊"
-                title="Show Performance Stats"
-                description="Display FPS and performance metrics"
+                title="Performance Stats"
+                description="Show performance statistics"
                 value={hyperFoneOS.state.showPerformanceStats}
                 onChange={(value) => hyperFoneOS.setState({ showPerformanceStats: value })}
                 theme={theme}
               />
+              <SettingToggle
+                icon="⚡"
+                title="Object Bounds"
+                description="Show object bounding boxes"
+                value={hyperFoneOS.state.showObjectBounds}
+                onChange={(value) => hyperFoneOS.setState({ showObjectBounds: value })}
+                theme={theme}
+              />
+            </SettingGroup>
+
+            <SettingGroup title="World Inspector" theme={theme}>
+              <div css={css`
+                border-radius: 8px;
+                overflow: hidden;
+              `}>
+                <DeveloperApp theme={theme} world={world} />
+              </div>
             </SettingGroup>
           </div>
         )

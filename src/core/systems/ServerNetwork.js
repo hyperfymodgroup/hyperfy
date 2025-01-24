@@ -5,6 +5,7 @@ import { addRole, hasRole, serializeRoles, uuid } from '../utils'
 import { System } from './System'
 import { createJWT, readJWT } from '../utils-server'
 import { cloneDeep } from 'lodash-es'
+import { fileExplorer } from '../../server/socket/fileExplorer'
 
 const SAVE_INTERVAL = parseInt(process.env.SAVE_INTERVAL || '60') // seconds
 const PING_RATE = 1 // seconds
@@ -195,6 +196,9 @@ export class ServerNetwork extends System {
         entities: this.world.entities.serialize(),
         authToken,
       })
+
+      // Initialize file explorer handlers
+      fileExplorer(socket)
 
       this.sockets.set(socket.id, socket)
     } catch (err) {
