@@ -34,10 +34,10 @@ services:
     networks:
       coolify-infra: {}
     labels:
-      com.docker.compose.project: ${COMPOSE_PROJECT_NAME}
-      coolify.version: ${VERSION}
-      coolify.managed: "true"
-      coolify.deployment.timestamp: ${DEPLOYMENT_TIMESTAMP}
+      "com.docker.compose.project": "${COMPOSE_PROJECT_NAME}"
+      "coolify.version": "${VERSION}"
+      "coolify.managed": "true"
+      "coolify.deployment.timestamp": "${DEPLOYMENT_TIMESTAMP}"
 
 networks:
   coolify-infra:
