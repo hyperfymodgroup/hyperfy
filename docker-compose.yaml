@@ -20,4 +20,4 @@ services:
       - PUBLIC_API_URL=${COOLIFY_URL}/api
       - PUBLIC_ASSETS_URL=${COOLIFY_URL}/assets
     volumes:
-      - world:/app/world
+      - world:/:/app/world
