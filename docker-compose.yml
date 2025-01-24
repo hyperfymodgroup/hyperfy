@@ -28,7 +28,7 @@ services:
     networks:
       - ${COOLIFY_NETWORK:-coolify-infra}
     labels:
-      coolify_managed: "true"
+      - "coolify.managed=true"
 
 networks:
   coolify-infra:
