@@ -8,7 +8,7 @@ version: '3.8'
 
 services:
   app:
-    image: howieduhzit/hyperfy-docker:main
+    image: howieduhzit/hyperfy:main
     container_name: ${COOLIFY_APP_NAME:-hyperfy}
     restart: unless-stopped
     environment:
