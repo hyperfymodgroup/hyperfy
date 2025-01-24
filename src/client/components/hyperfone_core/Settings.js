@@ -1,9 +1,8 @@
 import { css } from '@firebolt-dev/css'
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { themes, defaultWallpaper } from './themes'
 import { hyperFoneOS } from '../hyperfoneOS'
 import { useAuthContext } from '../../components/AuthProvider'
-import { createClient } from 'matrix-js-sdk'
 import { DeveloperApp } from './DeveloperApp'
 
 // Add developer mode state
@@ -64,117 +63,6 @@ export function Settings({
   const [buildTaps, setBuildTaps] = useState(0)
   const [isDeveloperMode, setIsDeveloperMode] = useState(false)
   const buildTapTimeout = useRef(null)
-
-  // Initialize Matrix client
-  useEffect(() => {
-    const savedMatrixSession = localStorage.getItem('hyperfy_matrix_session')
-    if (savedMatrixSession) {
-      const session = JSON.parse(savedMatrixSession)
-      const client = createClient({
-        baseUrl: 'https://matrix.org',
-        accessToken: session.accessToken,
-        userId: session.userId,
-        deviceId: session.deviceId
-      })
-      setMatrixClient(client)
-      setConnectedAccounts(prev => ({ ...prev, matrix: true }))
-    }
-  }, [])
-
-  // Initialize X connection from localStorage
-  useEffect(() => {
-    const savedXSession = localStorage.getItem('hyperfy_x_session')
-    if (savedXSession) {
-      try {
-        const session = JSON.parse(savedXSession)
-        setXProfile(session)
-        setConnectedAccounts(prev => ({ ...prev, twitter: true }))
-        // Update profile with X data
-        if (session.profile_image_url) setProfilePicture(session.profile_image_url)
-        if (session.name) setUsername(session.name)
-        if (session.description) setBio(session.description)
-      } catch (err) {
-        console.error('Failed to load X session:', err)
-        // Clear invalid session data
-        localStorage.removeItem('hyperfy_x_session')
-      }
-    }
-  }, [])
-
-  // Initialize connectedAccounts state
-  useEffect(() => {
-    const savedConnections = localStorage.getItem('hyperfy_connected_accounts')
-    if (savedConnections) {
-      try {
-        const connections = JSON.parse(savedConnections)
-        setConnectedAccounts(prev => ({ ...prev, ...connections }))
-      } catch (err) {
-        console.error('Failed to load connected accounts:', err)
-      }
-    }
-  }, [])
-
-  // Save connected accounts state
-  useEffect(() => {
-    localStorage.setItem('hyperfy_connected_accounts', JSON.stringify(connectedAccounts))
-  }, [connectedAccounts])
-
-  // Handle Matrix login
-  const handleMatrixLogin = async () => {
-    try {
-      setMatrixError(null)
-      const formattedUsername = matrixUsername.startsWith('@') ? matrixUsername : `@${matrixUsername}:matrix.org`
-      
-      const client = createClient({
-        baseUrl: 'https://matrix.org'
-      })
-
-      const response = await client.login('m.login.password', {
-        user: formattedUsername,
-        password: matrixPassword,
-        initial_device_display_name: 'Hyperfy Chat App'
-      })
-
-      // Save session
-      localStorage.setItem('hyperfy_matrix_session', JSON.stringify({
-        accessToken: response.access_token,
-        userId: response.user_id,
-        deviceId: response.device_id
-      }))
-
-      setMatrixClient(client)
-      setConnectedAccounts(prev => ({ ...prev, matrix: true }))
-      setMatrixPassword('') // Clear password for security
-    } catch (err) {
-      console.error('Failed to login to Matrix:', err)
-      setMatrixError('Failed to login. Please check your credentials and try again.')
-    }
-  }
-
-  // Handle Matrix logout
-  const handleMatrixLogout = async () => {
-    try {
-      if (matrixClient) {
-        await matrixClient.logout()
-      }
-      localStorage.removeItem('hyperfy_matrix_session')
-      setMatrixClient(null)
-      setConnectedAccounts(prev => ({ ...prev, matrix: false }))
-      setMatrixUsername('')
-      setMatrixPassword('')
-      setMatrixError(null)
-    } catch (err) {
-      console.error('Failed to logout from Matrix:', err)
-      setMatrixError('Failed to logout. Please try again.')
-    }
-  }
-
-  // Update animation settings
-  const updateAnimationSettings = (updates) => {
-    const newSettings = { ...animationSettings, ...updates }
-    setAnimationSettings(newSettings)
-    localStorage.setItem('hyperfy_animation_settings', JSON.stringify(newSettings))
-  }
 
   // Handle build number tap
   const handleBuildTap = () => {
@@ -2103,6 +1991,7 @@ export function Settings({
               <div css={css`
                 border-radius: 8px;
                 overflow: hidden;
+                min-height: 400px;
               `}>
                 <DeveloperApp theme={theme} world={world} />
               </div>

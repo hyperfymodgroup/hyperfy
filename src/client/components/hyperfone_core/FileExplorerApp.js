@@ -2,7 +2,7 @@ import { css } from '@firebolt-dev/css'
 import React, { useState, useEffect } from 'react'
 import { useSocket } from '../../hooks/useSocket'
 
-export function FileExplorerApp({ theme }) {
+export function FileExplorerApp({ theme, world }) {
   const [currentPath, setCurrentPath] = useState('')
   const [contents, setContents] = useState([])
   const [error, setError] = useState(null)
@@ -10,12 +10,23 @@ export function FileExplorerApp({ theme }) {
   const [selectedFile, setSelectedFile] = useState(null)
   const [downloadProgress, setDownloadProgress] = useState(null)
   const socket = useSocket()
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  // Check if user is admin
+  useEffect(() => {
+    if (world?.network?.socket?.player?.data?.user?.roles) {
+      const roles = world.network.socket.player.data.user.roles
+      setIsAdmin(roles.includes('admin') || roles.includes('~admin'))
+    }
+  }, [world?.network?.socket?.player?.data?.user?.roles])
 
   useEffect(() => {
     if (!socket) return
 
     const handleFileList = (data) => {
-      setContents(data.contents)
+      // Filter contents based on admin status
+      const filteredContents = isAdmin ? data.contents : data.contents.filter(item => !item.path.startsWith('/root'))
+      setContents(filteredContents)
       setLoading(false)
     }
 
@@ -64,7 +75,7 @@ export function FileExplorerApp({ theme }) {
     socket.on('fileDownloadComplete', handleDownloadComplete)
 
     // Request initial directory contents
-    socket.emit('fileList', { path: currentPath })
+    socket.emit('fileList', { path: currentPath, isAdmin })
 
     return () => {
       socket.off('fileList', handleFileList)
@@ -73,9 +84,14 @@ export function FileExplorerApp({ theme }) {
       socket.off('fileDownloadChunk', handleDownloadChunk)
       socket.off('fileDownloadComplete', handleDownloadComplete)
     }
-  }, [socket, currentPath])
+  }, [socket, currentPath, isAdmin])
 
   const handleNavigate = (path) => {
+    // Prevent non-admin users from accessing root directory
+    if (!isAdmin && path.startsWith('/root')) {
+      setError('Access denied: Root access requires admin privileges')
+      return
+    }
     setLoading(true)
     setError(null)
     setCurrentPath(path)
@@ -85,10 +101,17 @@ export function FileExplorerApp({ theme }) {
     const file = e.target.files[0]
     if (!file) return
 
+    // Prevent non-admin users from uploading to root directory
+    if (!isAdmin && currentPath.startsWith('/root')) {
+      setError('Access denied: Root access requires admin privileges')
+      return
+    }
+
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('path', currentPath)
+      formData.append('isAdmin', isAdmin)
 
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -100,14 +123,19 @@ export function FileExplorerApp({ theme }) {
       }
 
       // Refresh directory contents
-      socket.emit('fileList', { path: currentPath })
+      socket.emit('fileList', { path: currentPath, isAdmin })
     } catch (err) {
       setError(err.message)
     }
   }
 
   const handleDownload = (path) => {
-    socket.emit('fileDownload', { path })
+    // Prevent non-admin users from downloading from root directory
+    if (!isAdmin && path.startsWith('/root')) {
+      setError('Access denied: Root access requires admin privileges')
+      return
+    }
+    socket.emit('fileDownload', { path, isAdmin })
   }
 
   return (
