@@ -91,9 +91,9 @@ const WalletApp = lazyWithRetry(() => import('./hyperfone_core/WalletApp').then(
 const ChatApp = lazyWithRetry(() => import('./hyperfone_core/ChatApp').then(m => ({ default: m.ChatApp })))
 const WebBrowser = lazyWithRetry(() => import('./hyperfone_core/WebBrowser').then(m => ({ default: m.WebBrowser })))
 const InventoryApp = lazyWithRetry(() => import('./hyperfone_core/InventoryApp').then(m => ({ default: m.InventoryApp })))
-const ScreenShare = lazyWithRetry(() => import('./hyperfone_apps/ScreenShare').then(m => ({ default: m.ScreenShare })))
+const ScreenShare = lazyWithRetry(() => import('./hyperfone_core/ScreenShare').then(m => ({ default: m.ScreenShare })))
 const DeveloperApp = lazyWithRetry(() => import('./hyperfone_core/DeveloperApp').then(m => ({ default: m.DeveloperApp })))
-const MeshyApp = lazyWithRetry(() => import('./hyperfone_apps/MeshyApp').then(m => ({ default: m.MeshyApp })))
+const MeshyApp = lazyWithRetry(() => import('./hyperfone_core/MeshyApp').then(m => ({ default: m.MeshyApp })))
 const FileExplorerApp = lazyWithRetry(() => import('./hyperfone_core/FileExplorerApp').then(m => ({ default: m.FileExplorerApp })))
 
 export function HyperFone({ world, user, setUser }) {
