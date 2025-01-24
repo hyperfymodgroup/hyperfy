@@ -24,7 +24,7 @@ services:
     volumes:
       - ${COOLIFY_VOLUME_APP:-app_data}:/app/data
       - ${COOLIFY_VOLUME_ASSETS:-app_assets}:/app/assets
-      - ${COOLIFY_VOLUME_WORLD:-app_world}:/app/world
+      - ${COOLIFY_VOLUME_WORLD:-hyperfy_world}:/app/world
     networks:
       - ${COOLIFY_NETWORK:-coolify-infra}
     labels:
@@ -39,3 +39,5 @@ volumes:
     name: ${COOLIFY_VOLUME_APP:-hyperfy_app_data}
   app_assets:
     name: ${COOLIFY_VOLUME_ASSETS:-hyperfy_app_assets} 
+  world:
+    name: ${COOLIFY_VOLUME_ASSETS:-hyperfy_world} 
