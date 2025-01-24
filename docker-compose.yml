@@ -1,3 +1,9 @@
+# documentation: https://docs.hyperfy.io/
+# slogan: A high-performance 3D metaverse platform using Three.js and React
+# tags: metaverse,3d,threejs,react,gaming
+# logo: svgs/hyperfy.svg
+# port: 3000
+
 version: '3.8'
 
 services:
@@ -26,9 +32,12 @@ services:
       - ${COOLIFY_VOLUME_ASSETS:-app_assets}:/app/assets
       - ${COOLIFY_VOLUME_WORLD:-hyperfy_world}:/app/world
     networks:
-      - ${COOLIFY_NETWORK:-coolify-infra}
+      coolify-infra: {}
     labels:
-      - "coolify.managed=true"
+      com.docker.compose.project: ${COMPOSE_PROJECT_NAME}
+      coolify.version: ${VERSION}
+      coolify.managed: "true"
+      coolify.deployment.timestamp: ${DEPLOYMENT_TIMESTAMP}
 
 networks:
   coolify-infra:
@@ -36,8 +45,11 @@ networks:
 
 volumes:
   app_data:
-    name: ${COOLIFY_VOLUME_APP:-hyperfy_app_data}
+    name: ${COOLIFY_VOLUME_APP:-hyperfy_data}
+    driver: local
   app_assets:
-    name: ${COOLIFY_VOLUME_ASSETS:-hyperfy_app_assets} 
+    name: ${COOLIFY_VOLUME_ASSETS:-hyperfy_assets}
+    driver: local
   world:
-    name: ${COOLIFY_VOLUME_ASSETS:-hyperfy_world} 
+    name: ${COOLIFY_VOLUME_WORLD:-hyperfy_world}
+    driver: local 
