@@ -12,16 +12,16 @@ services:
     container_name: ${COOLIFY_APP_NAME:-hyperfy}
     restart: unless-stopped
     environment:
-      - DOMAIN=${DOMAIN:-hyperfy.howieduhzit.best}
+      - DOMAIN=${SERVICE_FQDN_APP}
       - WORLD=${WORLD:-world}
       - PORT=${PORT:-3000}
-      - JWT_SECRET=${JWT_SECRET:-hyper}
-      - ADMIN_CODE=${ADMIN_CODE:-}
+      - JWT_SECRET=${SERVICE_PASSWORD_APP}
+      - ADMIN_CODE=${SERVICE_PASSWORD_ADMIN}
       - SAVE_INTERVAL=60
       - PUBLIC_MAX_UPLOAD_SIZE=12
-      - PUBLIC_WS_URL=${PUBLIC_WS_URL:-http://{$DOMAIN}/ws}
-      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://{$DOMAIN}/api}
-      - PUBLIC_ASSETS_URL=${PUBLIC_ASSETS_URL:-http://{$DOMAIN}/assets}
+      - PUBLIC_WS_URL=${SERVICE_URL_WS:-${SERVICE_FQDN_APP}/ws}
+      - PUBLIC_API_URL=${SERVICE_URL_API:-${SERVICE_FQDN_APP}/api}
+      - PUBLIC_ASSETS_URL=${SERVICE_URL_ASSETS:-${SERVICE_FQDN_APP}/assets}
       - NODE_ENV=${NODE_ENV:-production}
     ports:
       - ${COOLIFY_PORT_80:-80}:80
