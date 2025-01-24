@@ -35,6 +35,7 @@ const clientHtmlDest = path.join(rootDir, 'build/public/index.html')
     metafile: true,
     jsx: 'automatic',
     jsxImportSource: '@firebolt-dev/jsx',
+    resolveExtensions: ['.js', '.jsx'],
     define: {
       // 'process.env.NODE_ENV': '"development"',
     },
@@ -49,6 +50,11 @@ const clientHtmlDest = path.join(rootDir, 'build/public/index.html')
         name: 'client-finalize-plugin',
         setup(build) {
           build.onEnd(async result => {
+            // Skip processing if build failed
+            if (result.errors.length > 0) {
+              return
+            }
+            
             // copy over public files
             await fs.copy(clientPublicDir, clientBuildDir)
             // find js output file
