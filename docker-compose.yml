@@ -13,9 +13,9 @@ services:
       - ADMIN_CODE=${ADMIN_CODE:-}
       - SAVE_INTERVAL=60
       - PUBLIC_MAX_UPLOAD_SIZE=12
-      - PUBLIC_WS_URL=${PUBLIC_WS_URL:-http://${DOMAIN}/ws
-      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://${DOMAIN}/api
-      - PUBLIC_ASSETS_URL=${PUBLIC_ASSETS_URL:-http://${DOMAIN}/assets
+      - PUBLIC_WS_URL=${PUBLIC_WS_URL:-http://${DOMAIN}/ws}
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://${DOMAIN}/api}
+      - PUBLIC_ASSETS_URL=${PUBLIC_ASSETS_URL:-http://${DOMAIN}/assets}
       - NODE_ENV=${NODE_ENV:-production}
     ports:
       - ${COOLIFY_PORT_80:-80}:80
@@ -28,7 +28,7 @@ services:
     networks:
       - ${COOLIFY_NETWORK:-coolify-infra}
     labels:
-      - $coolify.managed: "true"
+      coolify.managed: "true"
 
 networks:
   coolify-infra:
