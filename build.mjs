@@ -36,6 +36,7 @@ const clientHtmlDest = path.join(rootDir, 'build/public/index.html')
     jsx: 'automatic',
     jsxImportSource: '@firebolt-dev/jsx',
     resolveExtensions: ['.js', '.jsx'],
+    absWorkingDir: rootDir,
     define: {
       // 'process.env.NODE_ENV': '"development"',
     },
@@ -86,8 +87,8 @@ let spawn
 
 {
   const serverCtx = await esbuild.context({
-    entryPoints: ['src/server/index.js'],
-    outfile: 'build/index.js',
+    entryPoints: [path.join(rootDir, 'src/server/index.js')],
+    outfile: path.join(buildDir, 'index.js'),
     platform: 'node',
     format: 'esm',
     bundle: true,
@@ -95,6 +96,7 @@ let spawn
     minify: false,
     sourcemap: true,
     packages: 'external',
+    resolveExtensions: ['.js', '.jsx'],
     define: {
       'process.env.CLIENT': 'false',
       'process.env.SERVER': 'true',
@@ -104,15 +106,20 @@ let spawn
         name: 'server-finalize-plugin',
         setup(build) {
           build.onEnd(async result => {
+            // Skip processing if build failed
+            if (result.errors.length > 0) {
+              return
+            }
+            
             // copy over physx wasm
             const physxWasmSrc = path.join(rootDir, 'src/server/physx/physx-js-webidl.wasm')
-            const physxWasmDest = path.join(rootDir, 'build/physx-js-webidl.wasm')
+            const physxWasmDest = path.join(buildDir, 'physx-js-webidl.wasm')
             await fs.copy(physxWasmSrc, physxWasmDest)
             // start the server or stop here
             if (dev) {
               // (re)start server
               spawn?.kill('SIGTERM')
-              spawn = fork(path.join(rootDir, 'build/index.js'))
+              spawn = fork(path.join(buildDir, 'index.js'))
             } else {
               process.exit(1)
             }
@@ -120,7 +127,9 @@ let spawn
         },
       },
     ],
-    loader: {},
+    loader: {
+      '.js': 'jsx',
+    },
   })
   if (dev) {
     await serverCtx.watch()
