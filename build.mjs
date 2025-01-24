@@ -23,7 +23,7 @@ const clientHtmlDest = path.join(rootDir, 'build/public/index.html')
 
 {
   const clientCtx = await esbuild.context({
-    entryPoints: ['src/client/index.js'],
+    entryPoints: [path.join(rootDir, 'src/client/index.js')],
     entryNames: '/[name]-[hash]',
     outdir: clientBuildDir,
     platform: 'browser',
