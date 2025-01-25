@@ -1,10 +1,6 @@
 import { css } from '@firebolt-dev/css'
 import React, { useState, useEffect, Suspense, useTransition, startTransition } from 'react'
 import { hyperFoneOS } from './hyperfoneOS'
-<<<<<<< HEAD
-import * as THREE from 'three'
-=======
->>>>>>> dev
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component {
@@ -94,15 +90,8 @@ const WalletApp = lazyWithRetry(() => import('./hyperfone_core/WalletApp').then(
 const ChatApp = lazyWithRetry(() => import('./hyperfone_core/ChatApp').then(m => ({ default: m.ChatApp })))
 const WebBrowser = lazyWithRetry(() => import('./hyperfone_core/WebBrowser').then(m => ({ default: m.WebBrowser })))
 const InventoryApp = lazyWithRetry(() => import('./hyperfone_core/InventoryApp').then(m => ({ default: m.InventoryApp })))
-<<<<<<< HEAD
-const ScreenShare = lazyWithRetry(() => import('./hyperfone_core/ScreenShare').then(m => ({ default: m.ScreenShare })))
+// const ScreenShare = lazyWithRetry(() => import('./hyperfone_apps/ScreenShare').then(m => ({ default: m.ScreenShare })))
 const DeveloperApp = lazyWithRetry(() => import('./hyperfone_core/DeveloperApp').then(m => ({ default: m.DeveloperApp })))
-const MeshyApp = lazyWithRetry(() => import('./hyperfone_core/MeshyApp').then(m => ({ default: m.MeshyApp })))
-const FileExplorerApp = lazyWithRetry(() => import('./hyperfone_core/FileExplorerApp').then(m => ({ default: m.FileExplorerApp })))
-=======
-const ScreenShare = lazyWithRetry(() => import('./hyperfone_apps/ScreenShare').then(m => ({ default: m.ScreenShare })))
-const DeveloperApp = lazyWithRetry(() => import('./hyperfone_core/DeveloperApp').then(m => ({ default: m.DeveloperApp })))
->>>>>>> dev
 
 export function HyperFone({ world, user, setUser }) {
   const [isPending, startTransition] = useTransition()
@@ -201,53 +190,6 @@ export function HyperFone({ world, user, setUser }) {
     const handleStateChange = (newState) => {
       console.log('State changed:', newState);
       setOSState(prevState => ({...prevState, ...newState}));
-<<<<<<< HEAD
-      
-      // Handle developer options
-      if ('showPerformanceStats' in newState) {
-        const statsSystem = world.stats; // Access stats system directly
-        if (statsSystem) {
-          if (newState.showPerformanceStats) {
-            statsSystem.enable();
-          } else {
-            statsSystem.disable();
-          }
-        }
-      }
-
-      if ('showWorldInspector' in newState) {
-      }
-
-      if ('showObjectBounds' in newState) {
-        // Toggle object bounds visibility in the 3D scene
-        if (!world.stage?.scene) return;
-        
-        world.stage.scene.traverse((object) => {
-          if (object.isMesh) {
-            if (newState.showObjectBounds) {
-              if (!object.boundingBox) {
-                object.geometry.computeBoundingBox();
-              }
-              // Create or show bounding box helper
-              if (!object.boundingBoxHelper) {
-                object.boundingBoxHelper = new THREE.Box3Helper(
-                  object.geometry.boundingBox,
-                  new THREE.Color(0x00ff00)
-                );
-                world.stage.scene.add(object.boundingBoxHelper);
-              }
-            } else {
-              // Remove bounding box helper
-              if (object.boundingBoxHelper) {
-                world.stage.scene.remove(object.boundingBoxHelper);
-                object.boundingBoxHelper = null;
-              }
-            }
-          }
-        });
-      }
-=======
->>>>>>> dev
     };
     
     hyperFoneOS.onStateChange = handleStateChange;
@@ -255,11 +197,7 @@ export function HyperFone({ world, user, setUser }) {
     return () => {
       hyperFoneOS.onStateChange = null;
     };
-<<<<<<< HEAD
-  }, [world]);
-=======
   }, []);
->>>>>>> dev
 
   // Get current theme and wallpaper
   const currentTheme = hyperFoneOS.getCurrentTheme()
@@ -300,21 +238,12 @@ export function HyperFone({ world, user, setUser }) {
             const AppComponent = (() => {
               switch (osState.activeApp) {
                 case 'settings': return Settings
-<<<<<<< HEAD
-=======
                 case 'developer': return DeveloperApp
->>>>>>> dev
                 case 'appstore': return AppStore
                 case 'wallet': return WalletApp
                 case 'chat': return ChatApp
                 case 'browser': return WebBrowser
                 case 'inventory': return InventoryApp
-                case 'screenshare': return ScreenShare
-<<<<<<< HEAD
-                case 'meshy': return MeshyApp
-                case 'fileexplorer': return FileExplorerApp
-=======
->>>>>>> dev
                 default: return null
               }
             })()
@@ -323,10 +252,6 @@ export function HyperFone({ world, user, setUser }) {
               return (
                 <AppComponent 
                   theme={currentTheme}
-<<<<<<< HEAD
-                  world={world}
-=======
->>>>>>> dev
                   {...(osState.activeApp === 'settings' ? {
                     currentTheme: osState.currentTheme,
                     setCurrentTheme: (theme) => startTransition(() => hyperFoneOS.setState({ currentTheme: theme })),
@@ -345,12 +270,7 @@ export function HyperFone({ world, user, setUser }) {
                     setIsOpen,
                     handleOpenClose,
                     animationSettings,
-<<<<<<< HEAD
-                    setAnimationSettings,
-                    world
-=======
                     setAnimationSettings
->>>>>>> dev
                   } : {})}
                 />
               )
