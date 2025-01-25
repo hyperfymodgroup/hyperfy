@@ -8,7 +8,105 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuthContext } from '../../components/AuthProvider'
 import { uuid } from '../../../core/utils'
 import * as THREE from '../../../core/extras/three'
-import { PencilIcon, InfinityIcon } from 'lucide-react'
+import { PencilIcon, InfinityIcon, BoxIcon, GlobeIcon } from 'lucide-react'
+
+// Simple 3D preview component
+function ModelPreview({ blueprint, size = 150 }) {
+  const containerRef = useRef()
+
+  useEffect(() => {
+    if (!containerRef.current || !blueprint || !window.world?.blueprints) return
+
+    const loadModel = async () => {
+      try {
+        const blueprintData = window.world.blueprints.get(blueprint)
+        if (!blueprintData?.model) return
+
+        // Get model from loader
+        let model = window.world.loader.get('model', blueprintData.model)
+        if (!model) {
+          model = await window.world.loader.load('model', blueprintData.model)
+        }
+
+        if (model) {
+          // Create scene
+          const scene = new THREE.Scene()
+          const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000)
+          camera.position.set(0, 0.5, 2)
+          camera.lookAt(0, 0, 0)
+
+          const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            alpha: true 
+          })
+          renderer.setSize(size, size)
+          renderer.setClearColor(0x000000, 0)
+          containerRef.current.innerHTML = ''
+          containerRef.current.appendChild(renderer.domElement)
+
+          // Add light
+          const light = new THREE.AmbientLight(0xffffff, 1)
+          scene.add(light)
+
+          // Add model using Hyperfy's node system
+          const modelNode = model.toNodes()
+          scene.add(modelNode)
+
+          // Auto-scale model
+          const box = new THREE.Box3().setFromObject(modelNode)
+          const modelSize = box.getSize(new THREE.Vector3())
+          const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z)
+          const scale = 1.2 / maxDim
+          modelNode.scale.setScalar(scale)
+
+          // Center model
+          const center = box.getCenter(new THREE.Vector3())
+          modelNode.position.sub(center.multiplyScalar(scale))
+          modelNode.position.y -= 0.1
+
+          // Simple rotation animation
+          const animate = () => {
+            modelNode.rotation.y += 0.01
+            renderer.render(scene, camera)
+            return requestAnimationFrame(animate)
+          }
+
+          const animationFrame = requestAnimationFrame(animate)
+
+          return () => {
+            cancelAnimationFrame(animationFrame)
+            renderer.dispose()
+            if (containerRef.current) {
+              containerRef.current.innerHTML = ''
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load model:', err)
+      }
+    }
+
+    const cleanup = loadModel()
+    return () => {
+      if (cleanup && typeof cleanup.then === 'function') {
+        cleanup.then(cleanupFn => cleanupFn && cleanupFn())
+      }
+      if (containerRef.current) {
+        containerRef.current.innerHTML = ''
+      }
+    }
+  }, [blueprint, size])
+
+  return (
+    <div 
+      ref={containerRef}
+      css={css`
+        width: ${size}px;
+        height: ${size}px;
+      `}
+    />
+  )
+}
 
 export function InventoryApp() {
   const { user } = useAuthContext()
@@ -18,7 +116,7 @@ export function InventoryApp() {
   const [isLoading, setIsLoading] = useState(true)
   const [editingName, setEditingName] = useState(null)
   const [editingNameValue, setEditingNameValue] = useState('')
-  const [activeTab, setActiveTab] = useState('inventory') // 'inventory' or 'world'
+  const [activeTab, setActiveTab] = useState('inventory')
   const [infiniteItems, setInfiniteItems] = useState(new Set())
   
   // Refs for 3D rendering
@@ -97,18 +195,20 @@ export function InventoryApp() {
     const cleanupFunctions = []
 
     // Setup new renderers for each item
-    const setupRenderer = (containerId, blueprint) => {
+    const setupRenderer = async (containerId, blueprint) => {
       const container = modelContainersRef.current.get(containerId)
       if (!container || container.clientWidth === 0 || container.clientHeight === 0) return null
 
       // Create renderer
       const renderer = new THREE.WebGLRenderer({ 
         alpha: true,
-        antialias: true
+        antialias: true,
+        powerPreference: "high-performance"
       })
       renderer.setSize(container.clientWidth, container.clientHeight)
-      renderer.setPixelRatio(window.devicePixelRatio)
-      container.innerHTML = '' // Clear previous content
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+      renderer.setClearColor(0x000000, 0)
+      container.innerHTML = ''
       container.appendChild(renderer.domElement)
 
       // Create scene with cyberpunk atmosphere
@@ -123,14 +223,14 @@ export function InventoryApp() {
       camera.lookAt(0, 0, 0)
 
       // Add cyberpunk lighting
-      const ambientLight = new THREE.AmbientLight(0x551bf9, 0.4) // Purple ambient
+      const ambientLight = new THREE.AmbientLight(0x551bf9, 0.4)
       scene.add(ambientLight)
       
-      const mainLight = new THREE.DirectionalLight(0x00ffff, 0.8) // Cyan main light
+      const mainLight = new THREE.DirectionalLight(0x00ffff, 0.8)
       mainLight.position.set(1, 2, 3)
       scene.add(mainLight)
       
-      const backLight = new THREE.DirectionalLight(0xff00ff, 0.5) // Magenta backlight
+      const backLight = new THREE.DirectionalLight(0xff00ff, 0.5)
       backLight.position.set(-1, 1, -2)
       scene.add(backLight)
 
@@ -146,67 +246,81 @@ export function InventoryApp() {
       scenesRef.current.set(containerId, scene)
       camerasRef.current.set(containerId, camera)
 
-      // Start animation
-      let animationFrame
-      const animate = () => {
-        animationFrame = requestAnimationFrame(animate)
-        const model = modelsRef.current.get(containerId)
-        if (model) {
-          model.rotation.y += 0.01
-        }
-        renderer.render(scene, camera)
-      }
-      animate()
-
       // Load model if blueprint exists
       if (blueprint && window.world?.blueprints) {
-        const loadModel = async () => {
-          try {
-            const blueprintData = window.world.blueprints.get(blueprint)
-            if (!blueprintData) {
-              console.warn('Blueprint not found:', blueprint)
-              return
-            }
-
-            let glb = window.world.loader.get('glb', blueprintData.model)
-            if (!glb) {
-              glb = await window.world.loader.load('glb', blueprintData.model)
-            }
-
-            if (glb) {
-              const group = new THREE.Group()
-              const modelNodes = glb.scene.clone()
-              group.add(modelNodes)
-              
-              // Scale and center the model
-              const box = new THREE.Box3().setFromObject(group)
-              const size = box.getSize(new THREE.Vector3())
-              const maxDim = Math.max(size.x, size.y, size.z)
-              const scale = 1 / maxDim
-              group.scale.setScalar(scale)
-              
-              const center = box.getCenter(new THREE.Vector3())
-              group.position.sub(center.multiplyScalar(scale))
-              
-              // Adjust camera for preview
-              if (containerId === 'details') {
-                camera.position.z = 3
-              } else {
-                camera.position.z = 2
-              }
-              
-              scene.add(group)
-              modelsRef.current.set(containerId, group)
-            }
-          } catch (err) {
-            console.warn('Failed to load model for item:', blueprint, err)
+        try {
+          const blueprintData = window.world.blueprints.get(blueprint)
+          if (!blueprintData) {
+            console.warn('Blueprint not found:', blueprint)
+            return null
           }
+
+          // Try to get the model from the loader
+          let model = window.world.loader.get('model', blueprintData.model)
+          if (!model) {
+            // If not found, try to load it
+            model = await window.world.loader.load('model', blueprintData.model)
+          }
+
+          if (model) {
+            // Create a group to hold the model
+            const group = new THREE.Group()
+            
+            // Clone the model scene
+            const modelScene = model.scene.clone()
+            group.add(modelScene)
+            
+            // Scale and center the model
+            const box = new THREE.Box3().setFromObject(group)
+            const size = box.getSize(new THREE.Vector3())
+            const maxDim = Math.max(size.x, size.y, size.z)
+            const scale = 1 / maxDim
+            group.scale.setScalar(scale)
+            
+            const center = box.getCenter(new THREE.Vector3())
+            group.position.sub(center.multiplyScalar(scale))
+            
+            // Add to scene
+            scene.add(group)
+            modelsRef.current.set(containerId, group)
+
+            // Adjust camera based on container
+            if (containerId === 'details') {
+              camera.position.z = 3
+            } else {
+              camera.position.z = 2
+            }
+
+            // Start animation loop
+            let animationFrame
+            const animate = () => {
+              animationFrame = requestAnimationFrame(animate)
+              if (modelsRef.current.has(containerId)) {
+                const model = modelsRef.current.get(containerId)
+                if (model) {
+                  model.rotation.y += 0.01
+                }
+              }
+              renderer.render(scene, camera)
+            }
+            animate()
+
+            // Return cleanup function
+            return () => {
+              cancelAnimationFrame(animationFrame)
+              renderer.dispose()
+              renderer.forceContextLoss()
+              renderer.domElement.remove()
+              container.innerHTML = ''
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to load model for item:', blueprint, err)
         }
-        loadModel()
       }
 
+      // If we get here without returning a cleanup function, create a default one
       return () => {
-        cancelAnimationFrame(animationFrame)
         renderer.dispose()
         renderer.forceContextLoss()
         renderer.domElement.remove()
@@ -215,17 +329,22 @@ export function InventoryApp() {
     }
 
     // Setup renderers for inventory items
-    items.forEach(item => {
-      const cleanup = setupRenderer(item.id, item.blueprint)
-      if (cleanup) cleanupFunctions.push(cleanup)
-    })
+    const setupItems = async () => {
+      for (const item of items) {
+        const cleanup = await setupRenderer(item.id, item.blueprint)
+        if (cleanup) cleanupFunctions.push(cleanup)
+      }
 
-    // Setup renderer for details preview if an item is selected
-    if (selectedItem) {
-      const cleanup = setupRenderer('details', selectedItem.blueprint)
-      if (cleanup) cleanupFunctions.push(cleanup)
+      // Setup renderer for details preview if an item is selected
+      if (selectedItem) {
+        const cleanup = await setupRenderer('details', selectedItem.blueprint)
+        if (cleanup) cleanupFunctions.push(cleanup)
+      }
     }
 
+    setupItems()
+
+    // Cleanup function
     return () => {
       cleanupFunctions.forEach(cleanup => {
         if (typeof cleanup === 'function') {
@@ -294,10 +413,23 @@ export function InventoryApp() {
       try {
         const blueprint = window.world.blueprints.get(newItem.blueprint)
         if (blueprint) {
+          // Get model and try to find rigidbody name
+          let model = window.world.loader.get('model', blueprint.model)
+          let rigidBodyName = 'Unnamed Item'
+          
+          if (model) {
+            const modelNode = model.toNodes()
+            modelNode.traverse(node => {
+              if (node.name === 'rigidbody') {
+                rigidBodyName = node.parent?.name || 'Unnamed Item'
+              }
+            })
+          }
+
           itemData = {
             ...itemData,
-            model: blueprint.model, // Store the model path
-            name: blueprint.name || newItem.name || 'Unnamed Item',
+            model: blueprint.model,
+            name: rigidBodyName,
             description: blueprint.description || ''
           }
         }
@@ -317,7 +449,7 @@ export function InventoryApp() {
     } else {
       updatedItems.push({
         ...itemData,
-        id: uuid(), // Generate new ID for inventory item
+        id: uuid(),
         quantity: 1
       })
     }
@@ -485,9 +617,11 @@ export function InventoryApp() {
         align-items: center;
         justify-content: center;
         height: 100%;
-        color: rgba(255, 255, 255, 0.6);
+        color: #00ffff;
+        font-family: 'Courier New', monospace;
+        text-shadow: 0 0 10px #00ffff;
       `}>
-        Loading...
+        LOADING...
       </div>
     )
   }
@@ -497,407 +631,421 @@ export function InventoryApp() {
       display: flex;
       flex-direction: column;
       height: 100%;
-      background: rgba(0, 0, 0, 0.1);
+      background: rgba(0, 0, 0, 0.9);
+      color: #00ffff;
+      font-family: 'Courier New', monospace;
+      position: relative;
+      overflow: hidden;
+
+      &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: 
+          linear-gradient(90deg, #00ffff03 1px, transparent 1px) 0 0 / 20px 20px,
+          linear-gradient(0deg, #00ffff03 1px, transparent 1px) 0 0 / 20px 20px;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      &::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at center, transparent 0%, rgba(0, 0, 0, 0.8) 100%);
+        pointer-events: none;
+        z-index: 0;
+      }
     `}>
-      {/* Tabs */}
+      {/* Header */}
       <div css={css`
         display: flex;
-        padding: 10px 20px 0;
-        gap: 10px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 15px;
+        border-bottom: 1px solid #00ffff22;
+        background: rgba(0, 0, 0, 0.5);
+        position: relative;
+        z-index: 1;
       `}>
-        <button
-          onClick={() => setActiveTab('inventory')}
-          css={css`
-            background: none;
-            border: none;
-            color: ${activeTab === 'inventory' ? 'white' : 'rgba(255, 255, 255, 0.6)'};
-            padding: 10px 20px;
-            font-size: 14px;
-            cursor: pointer;
-            position: relative;
-            
-            &:after {
-              content: '';
-              position: absolute;
-              bottom: -1px;
-              left: 0;
-              right: 0;
-              height: 2px;
-              background: ${activeTab === 'inventory' ? '#551bf9' : 'transparent'};
-            }
-          `}
-        >
-          Inventory ({items.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('world')}
-          css={css`
-            background: none;
-            border: none;
-            color: ${activeTab === 'world' ? 'white' : 'rgba(255, 255, 255, 0.6)'};
-            padding: 10px 20px;
-            font-size: 14px;
-            cursor: pointer;
-            position: relative;
-            
-            &:after {
-              content: '';
-              position: absolute;
-              bottom: -1px;
-              left: 0;
-              right: 0;
-              height: 2px;
-              background: ${activeTab === 'world' ? '#551bf9' : 'transparent'};
-            }
-          `}
-        >
-          World Items ({worldItems.length})
-        </button>
+        <div css={css`
+          display: flex;
+          gap: 10px;
+        `}>
+          <button
+            onClick={() => setActiveTab('inventory')}
+            css={css`
+              background: ${activeTab === 'inventory' ? '#00ffff11' : 'transparent'};
+              border: 1px solid ${activeTab === 'inventory' ? '#00ffff' : '#00ffff44'};
+              color: ${activeTab === 'inventory' ? '#00ffff' : '#00ffff88'};
+              padding: 8px 16px;
+              font-family: 'Courier New', monospace;
+              font-size: 14px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              cursor: pointer;
+              transition: all 0.2s ease;
+              position: relative;
+              overflow: hidden;
+
+              &:hover {
+                border-color: #00ffff;
+                color: #00ffff;
+                text-shadow: 0 0 10px #00ffff;
+              }
+
+              &::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, #00ffff, transparent);
+                transform: translateX(${activeTab === 'inventory' ? '0' : '-100%'});
+                transition: transform 0.3s ease;
+              }
+            `}
+          >
+            <BoxIcon size={16} />
+            INVENTORY [{items.length}]
+          </button>
+          <button
+            onClick={() => setActiveTab('world')}
+            css={css`
+              background: ${activeTab === 'world' ? '#00ffff11' : 'transparent'};
+              border: 1px solid ${activeTab === 'world' ? '#00ffff' : '#00ffff44'};
+              color: ${activeTab === 'world' ? '#00ffff' : '#00ffff88'};
+              padding: 8px 16px;
+              font-family: 'Courier New', monospace;
+              font-size: 14px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              cursor: pointer;
+              transition: all 0.2s ease;
+              position: relative;
+              overflow: hidden;
+
+              &:hover {
+                border-color: #00ffff;
+                color: #00ffff;
+                text-shadow: 0 0 10px #00ffff;
+              }
+
+              &::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, #00ffff, transparent);
+                transform: translateX(${activeTab === 'world' ? '0' : '-100%'});
+                transition: transform 0.3s ease;
+              }
+            `}
+          >
+            <GlobeIcon size={16} />
+            WORLD [{worldItems.length}]
+          </button>
+        </div>
       </div>
 
+      {/* Main Content */}
       <div css={css`
         display: flex;
         flex: 1;
-        overflow: hidden;
+        position: relative;
+        z-index: 1;
       `}>
-        {/* Main Content */}
+        {/* Items Grid */}
         <div css={css`
           flex: 1;
           padding: 20px;
           overflow-y: auto;
+          
+          &::-webkit-scrollbar {
+            width: 8px;
+          }
+          
+          &::-webkit-scrollbar-track {
+            background: #00ffff11;
+          }
+          
+          &::-webkit-scrollbar-thumb {
+            background: #00ffff33;
+            border-radius: 4px;
+            
+            &:hover {
+              background: #00ffff66;
+            }
+          }
         `}>
-          {activeTab === 'inventory' ? (
-            // Inventory Items Grid
-            items.length === 0 ? (
-              <div css={css`
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                height: 200px;
-                color: rgba(255, 255, 255, 0.6);
-                text-align: center;
-                font-size: 14px;
-              `}>
-                Your inventory is empty.
-                <br />
-                Right-click objects in the world to pick them up.
-              </div>
-            ) : (
-              <div css={css`
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-                gap: 20px;
-              `}>
-                {items.map(item => (
-                  <div
-                    key={item.id}
-                    onClick={() => handleSelectItem(item)}
-                    css={css`
-                      background: rgba(0, 0, 0, 0.2);
-                      border: 1px solid ${selectedItem?.id === item.id ? '#551bf9' : 'rgba(255, 255, 255, 0.1)'};
-                      border-radius: 8px;
-                      overflow: hidden;
-                      cursor: pointer;
-                      transition: all 0.2s ease;
-                      
-                      &:hover {
-                        border-color: #551bf9;
-                        transform: translateY(-2px);
-                      }
-                    `}
-                  >
-                    <div 
-                      ref={el => el && modelContainersRef.current.set(item.id, el)}
-                      css={css`
-                        aspect-ratio: 1;
-                        background: rgba(0, 0, 0, 0.1);
-                        position: relative;
-                        width: 100%;
-                        height: 150px;
-                      `}
-                    >
-                      <div css={css`
-                        position: absolute;
-                        bottom: 5px;
-                        right: 5px;
-                        background: rgba(0, 0, 0, 0.5);
-                        color: white;
-                        font-size: 10px;
-                        padding: 2px 6px;
-                        border-radius: 10px;
-                        z-index: 1;
-                      `}>
-                        {item.quantity}
-                      </div>
-                    </div>
-                    <div css={css`
-                      padding: 8px;
-                    `}>
-                      {editingName === item.id ? (
-                        <input
-                          type="text"
-                          value={editingNameValue}
-                          onChange={e => setEditingNameValue(e.target.value)}
-                          onBlur={saveEditingName}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') saveEditingName()
-                            if (e.key === 'Escape') setEditingName(null)
-                          }}
-                          onClick={e => e.stopPropagation()}
-                          autoFocus
-                          css={css`
-                            width: 100%;
-                            background: rgba(0, 0, 0, 0.2);
-                            border: 1px solid rgba(255, 255, 255, 0.1);
-                            border-radius: 4px;
-                            color: white;
-                            font-size: 12px;
-                            padding: 4px 8px;
-                            outline: none;
-                            
-                            &:focus {
-                              border-color: #551bf9;
-                            }
-                          `}
-                        />
-                      ) : (
-                        <div css={css`
-                          display: flex;
-                          align-items: center;
-                          gap: 4px;
-                        `}>
-                          <div css={css`
-                            color: white;
-                            font-size: 12px;
-                            font-weight: 500;
-                            margin-bottom: 2px;
-                            white-space: nowrap;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                            flex: 1;
-                          `}>
-                            {item.name}
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              startEditingName(item)
-                            }}
-                            css={css`
-                              background: none;
-                              border: none;
-                              padding: 2px;
-                              color: rgba(255, 255, 255, 0.6);
-                              cursor: pointer;
-                              display: flex;
-                              align-items: center;
-                              justify-content: center;
-                              opacity: 0.6;
-                              transition: opacity 0.2s;
+          {(activeTab === 'inventory' ? items : worldItems).length === 0 ? (
+            <div css={css`
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 200px;
+              color: #00ffff88;
+              text-align: center;
+              font-size: 14px;
+              border: 1px dashed #00ffff44;
+              border-radius: 8px;
+              background: #00ffff06;
+            `}>
+              {activeTab === 'inventory' ? (
+                <>NO ITEMS IN INVENTORY<br />RIGHT-CLICK OBJECTS TO COLLECT</>
+              ) : (
+                <>NO ITEMS IN WORLD</>
+              )}
+            </div>
+          ) : (
+            <div css={css`
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+              gap: 15px;
+            `}>
+              {(activeTab === 'inventory' ? items : worldItems).map(item => (
+                <div
+                  key={item.id}
+                  onClick={() => handleSelectItem(item)}
+                  css={css`
+                    background: #00ffff08;
+                    border: 1px solid ${selectedItem?.id === item.id ? '#00ffff' : '#00ffff22'};
+                    border-radius: 4px;
+                    overflow: hidden;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    position: relative;
+                    
+                    &:hover {
+                      border-color: #00ffff;
+                      transform: translateY(-2px);
+                      box-shadow: 0 0 20px #00ffff22;
 
-                              &:hover {
-                                opacity: 1;
-                              }
-                            `}
-                          >
-                            <PencilIcon size={12} />
-                          </button>
+                      &::before {
+                        opacity: 1;
+                      }
+                    }
+
+                    &::before {
+                      content: '';
+                      position: absolute;
+                      inset: 0;
+                      background: linear-gradient(45deg, transparent, #00ffff11);
+                      opacity: 0;
+                      transition: opacity 0.2s ease;
+                      pointer-events: none;
+                    }
+                  `}
+                >
+                  <ModelPreview blueprint={item.blueprint} />
+                  <div css={css`
+                    padding: 10px;
+                    border-top: 1px solid #00ffff22;
+                    background: #00000066;
+                  `}>
+                    <div css={css`
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                    `}>
+                      <div css={css`
+                        color: #00ffff;
+                        font-size: 12px;
+                        font-weight: 500;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        flex: 1;
+                      `}>
+                        {item.name}
+                      </div>
+                      {activeTab === 'inventory' && (
+                        <div css={css`
+                          font-size: 12px;
+                          color: #00ffff88;
+                          padding: 2px 6px;
+                          border: 1px solid #00ffff44;
+                          border-radius: 4px;
+                          background: #00ffff11;
+                        `}>
+                          {infiniteItems.has(item.id) ? '∞' : item.quantity}
                         </div>
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )
-          ) : (
-            // World Items Grid
-            worldItems.length === 0 ? (
-              <div css={css`
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                height: 200px;
-                color: rgba(255, 255, 255, 0.6);
-                text-align: center;
-                font-size: 14px;
-              `}>
-                No items found in the world.
-              </div>
-            ) : (
-              <div css={css`
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-                gap: 20px;
-              `}>
-                {worldItems.map(item => (
-                  <div
-                    key={item.id}
-                    onClick={() => handleSelectItem(item)}
-                    css={css`
-                      background: rgba(0, 0, 0, 0.2);
-                      border: 1px solid ${selectedItem?.id === item.id ? '#551bf9' : 'rgba(255, 255, 255, 0.1)'};
-                      border-radius: 8px;
-                      overflow: hidden;
-                      cursor: pointer;
-                      transition: all 0.2s ease;
-                      
-                      &:hover {
-                        border-color: #551bf9;
-                        transform: translateY(-2px);
-                      }
-                    `}
-                  >
-                    <div 
-                      ref={el => el && modelContainersRef.current.set(item.id, el)}
-                      css={css`
-                        aspect-ratio: 1;
-                        background: rgba(0, 0, 0, 0.1);
-                        position: relative;
-                        width: 100%;
-                        height: 150px;
-                      `}
-                    />
-                    <div css={css`
-                      padding: 8px;
-                    `}>
-                      <div css={css`
-                        display: flex;
-                        align-items: center;
-                        gap: 4px;
-                      `}>
-                        <div css={css`
-                          color: white;
-                          font-size: 12px;
-                          font-weight: 500;
-                          margin-bottom: 2px;
-                          white-space: nowrap;
-                          overflow: hidden;
-                          text-overflow: ellipsis;
-                          flex: 1;
-                        `}>
-                          {item.name}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Item Details */}
+        {/* Details Panel */}
         {selectedItem && (
           <div css={css`
             width: 300px;
-            background: rgba(0, 0, 0, 0.2);
-            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            background: #00000099;
+            border-left: 1px solid #00ffff22;
             padding: 20px;
             display: flex;
             flex-direction: column;
+            gap: 20px;
+            position: relative;
+            overflow: hidden;
+
+            &::before {
+              content: '';
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 2px;
+              background: linear-gradient(90deg, transparent, #00ffff44, transparent);
+            }
           `}>
-            <div 
-              ref={el => el && modelContainersRef.current.set('details', el)}
-              css={css`
-                aspect-ratio: 1;
-                background: rgba(0, 0, 0, 0.2);
-                border-radius: 8px;
-                margin-bottom: 20px;
-                overflow: hidden;
-              `}
-            />
+            {/* Preview Container */}
             <div css={css`
-              display: flex;
-              align-items: center;
-              gap: 8px;
-              margin-bottom: 10px;
+              aspect-ratio: 1;
+              width: 100%;
+              background: #00000066;
+              border: 1px solid #00ffff22;
+              border-radius: 4px;
+              overflow: hidden;
+              position: relative;
             `}>
-              <h2 css={css`
-                color: white;
-                font-size: 18px;
-                margin: 0;
-                flex: 1;
-              `}>
-                {selectedItem.name}
-              </h2>
-              {activeTab === 'inventory' && (
-                <>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      startEditingName(selectedItem)
-                    }}
-                    css={css`
-                      background: none;
-                      border: none;
-                      padding: 4px;
-                      color: rgba(255, 255, 255, 0.6);
-                      cursor: pointer;
-                      display: flex;
-                      align-items: center;
-                      justify-content: center;
-                      opacity: 0.6;
-                      transition: opacity 0.2s;
-
-                      &:hover {
-                        opacity: 1;
-                      }
-                    `}
-                  >
-                    <PencilIcon size={16} />
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={() => toggleInfinite(selectedItem.id)}
-                      css={css`
-                        background: none;
-                        border: none;
-                        padding: 4px;
-                        color: ${infiniteItems.has(selectedItem.id) ? '#551bf9' : 'rgba(255, 255, 255, 0.6)'};
-                        cursor: pointer;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        opacity: 0.6;
-                        transition: all 0.2s;
-
-                        &:hover {
-                          opacity: 1;
-                          transform: scale(1.1);
-                        }
-                      `}
-                    >
-                      <InfinityIcon size={16} />
-                    </button>
-                  )}
-                </>
-              )}
+              <ModelPreview blueprint={selectedItem.blueprint} size={260} />
             </div>
-            <p css={css`
-              color: rgba(255, 255, 255, 0.6);
-              font-size: 14px;
-              margin-bottom: 20px;
+            
+            {/* Info Container */}
+            <div css={css`
               flex: 1;
+              min-height: 0;
+              display: flex;
+              flex-direction: column;
+              gap: 15px;
+              overflow-y: auto;
+              padding-right: 5px;
+              
+              &::-webkit-scrollbar {
+                width: 4px;
+              }
+              
+              &::-webkit-scrollbar-track {
+                background: #00ffff11;
+              }
+              
+              &::-webkit-scrollbar-thumb {
+                background: #00ffff33;
+                border-radius: 2px;
+                
+                &:hover {
+                  background: #00ffff66;
+                }
+              }
             `}>
-              {selectedItem.description}
-              {activeTab === 'world' && selectedItem.position && (
-                <div css={css`margin-top: 10px;`}>
-                  Position: {selectedItem.position.map(n => n.toFixed(2)).join(', ')}
-                </div>
-              )}
-              {activeTab === 'inventory' && isAdmin && infiniteItems.has(selectedItem.id) && (
+              <div css={css`
+                padding: 15px;
+                background: #00ffff08;
+                border: 1px solid #00ffff22;
+                border-radius: 4px;
+              `}>
                 <div css={css`
-                  margin-top: 10px;
-                  color: #551bf9;
-                  font-style: italic;
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  margin-bottom: 10px;
                 `}>
-                  ∞ Infinite item
+                  <h2 css={css`
+                    color: #00ffff;
+                    font-size: 18px;
+                    margin: 0;
+                    flex: 1;
+                    text-shadow: 0 0 10px #00ffff44;
+                  `}>
+                    {selectedItem.name}
+                  </h2>
+                  {activeTab === 'inventory' && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          startEditingName(selectedItem)
+                        }}
+                        css={css`
+                          background: none;
+                          border: none;
+                          padding: 4px;
+                          color: #00ffff88;
+                          cursor: pointer;
+                          transition: all 0.2s;
+
+                          &:hover {
+                            color: #00ffff;
+                            transform: scale(1.1);
+                          }
+                        `}
+                      >
+                        <PencilIcon size={16} />
+                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => toggleInfinite(selectedItem.id)}
+                          css={css`
+                            background: none;
+                            border: none;
+                            padding: 4px;
+                            color: ${infiniteItems.has(selectedItem.id) ? '#00ffff' : '#00ffff88'};
+                            cursor: pointer;
+                            transition: all 0.2s;
+
+                            &:hover {
+                              color: #00ffff;
+                              transform: scale(1.1);
+                            }
+                          `}
+                        >
+                          <InfinityIcon size={16} />
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
-              )}
-            </p>
+                
+                <p css={css`
+                  color: #00ffff88;
+                  font-size: 14px;
+                  margin: 0;
+                  line-height: 1.4;
+                `}>
+                  {selectedItem.description}
+                  {activeTab === 'world' && selectedItem.position && (
+                    <div css={css`
+                      margin-top: 10px;
+                      padding-top: 10px;
+                      border-top: 1px solid #00ffff22;
+                      font-family: monospace;
+                    `}>
+                      POS: [{selectedItem.position.map(n => n.toFixed(2)).join(', ')}]
+                    </div>
+                  )}
+                  {activeTab === 'inventory' && infiniteItems.has(selectedItem.id) && (
+                    <div css={css`
+                      margin-top: 10px;
+                      padding-top: 10px;
+                      border-top: 1px solid #00ffff22;
+                      color: #00ffff;
+                      font-style: italic;
+                    `}>
+                      ∞ INFINITE ITEM
+                    </div>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
             <div css={css`
               display: flex;
               gap: 10px;
@@ -908,40 +1056,60 @@ export function InventoryApp() {
                     onClick={() => handleUseItem(selectedItem)}
                     css={css`
                       flex: 1;
-                      background: #551bf9;
-                      border: none;
-                      color: white;
+                      background: #00ffff11;
+                      border: 1px solid #00ffff;
+                      color: #00ffff;
                       padding: 12px;
-                      border-radius: 8px;
+                      font-family: 'Courier New', monospace;
                       font-size: 14px;
                       cursor: pointer;
-                      transition: all 0.2s ease;
-                      
+                      transition: all 0.2s;
+                      position: relative;
+                      overflow: hidden;
+
                       &:hover {
-                        background: #6633ff;
+                        background: #00ffff22;
+                        text-shadow: 0 0 10px #00ffff;
+                      }
+
+                      &::before {
+                        content: '';
+                        position: absolute;
+                        top: -2px;
+                        left: -2px;
+                        right: -2px;
+                        bottom: -2px;
+                        background: linear-gradient(45deg, transparent, #00ffff33, transparent);
+                        opacity: 0;
+                        transition: opacity 0.2s;
+                      }
+
+                      &:hover::before {
+                        opacity: 1;
                       }
                     `}
                   >
-                    Place
+                    PLACE
                   </button>
                   <button
                     onClick={() => handleDropItem(selectedItem)}
                     css={css`
-                      background: #ff4444;
-                      border: none;
-                      color: white;
+                      background: #ff000011;
+                      border: 1px solid #ff0000;
+                      color: #ff0000;
                       padding: 12px;
-                      border-radius: 8px;
+                      font-family: 'Courier New', monospace;
                       font-size: 14px;
                       cursor: pointer;
-                      transition: all 0.2s ease;
-                      
+                      transition: all 0.2s;
+
                       &:hover {
-                        background: #ff6666;
+                        background: #ff000022;
+                        text-shadow: 0 0 10px #ff0000;
                       }
                     `}
                   >
-                    Drop
+                    DROP
                   </button>
                 </>
               ) : (
@@ -949,21 +1117,22 @@ export function InventoryApp() {
                   onClick={() => handlePickupWorldItem(selectedItem)}
                   css={css`
                     flex: 1;
-                    background: #551bf9;
-                    border: none;
-                    color: white;
+                    background: #00ffff11;
+                    border: 1px solid #00ffff;
+                    color: #00ffff;
                     padding: 12px;
-                    border-radius: 8px;
+                    font-family: 'Courier New', monospace;
                     font-size: 14px;
                     cursor: pointer;
-                    transition: all 0.2s ease;
-                    
+                    transition: all 0.2s;
+
                     &:hover {
-                      background: #6633ff;
+                      background: #00ffff22;
+                      text-shadow: 0 0 10px #00ffff;
                     }
                   `}
                 >
-                  Pick Up
+                  PICK UP
                 </button>
               )}
             </div>
