@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuthContext } from '../../components/AuthProvider'
 import { uuid } from '../../../core/utils'
 import * as THREE from '../../../core/extras/three'
-import { PencilIcon } from 'lucide-react'
+import { PencilIcon, InfinityIcon } from 'lucide-react'
 
 export function InventoryApp() {
   const { user } = useAuthContext()
@@ -19,6 +19,7 @@ export function InventoryApp() {
   const [editingName, setEditingName] = useState(null)
   const [editingNameValue, setEditingNameValue] = useState('')
   const [activeTab, setActiveTab] = useState('inventory') // 'inventory' or 'world'
+  const [infiniteItems, setInfiniteItems] = useState(new Set())
   
   // Refs for 3D rendering
   const modelContainersRef = useRef(new Map())
@@ -110,20 +111,35 @@ export function InventoryApp() {
       container.innerHTML = '' // Clear previous content
       container.appendChild(renderer.domElement)
 
-      // Create scene
+      // Create scene with cyberpunk atmosphere
       const scene = new THREE.Scene()
+      
+      // Add fog for depth
+      scene.fog = new THREE.FogExp2(0x000000, 0.15)
       
       // Create camera
       const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000)
-      camera.position.set(0, 0.5, 2) // Position camera slightly above and back
+      camera.position.set(0, 0.5, 2)
       camera.lookAt(0, 0, 0)
 
-      // Add lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7)
+      // Add cyberpunk lighting
+      const ambientLight = new THREE.AmbientLight(0x551bf9, 0.4) // Purple ambient
       scene.add(ambientLight)
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
-      directionalLight.position.set(1, 2, 3)
-      scene.add(directionalLight)
+      
+      const mainLight = new THREE.DirectionalLight(0x00ffff, 0.8) // Cyan main light
+      mainLight.position.set(1, 2, 3)
+      scene.add(mainLight)
+      
+      const backLight = new THREE.DirectionalLight(0xff00ff, 0.5) // Magenta backlight
+      backLight.position.set(-1, 1, -2)
+      scene.add(backLight)
+
+      // Add grid floor for preview window only
+      if (containerId === 'details') {
+        const grid = new THREE.GridHelper(4, 10, 0x551bf9, 0x551bf944)
+        grid.position.y = -0.5
+        scene.add(grid)
+      }
 
       // Store refs
       renderersRef.current.set(containerId, renderer)
@@ -146,39 +162,38 @@ export function InventoryApp() {
       if (blueprint && window.world?.blueprints) {
         const loadModel = async () => {
           try {
-            // First get the blueprint
             const blueprintData = window.world.blueprints.get(blueprint)
             if (!blueprintData) {
               console.warn('Blueprint not found:', blueprint)
               return
             }
 
-            // Then try to get the GLB from the blueprint's model path
             let glb = window.world.loader.get('glb', blueprintData.model)
             if (!glb) {
               glb = await window.world.loader.load('glb', blueprintData.model)
             }
 
             if (glb) {
-              // Create a group to hold the model
               const group = new THREE.Group()
-              
-              // Add the model to the group
               const modelNodes = glb.scene.clone()
               group.add(modelNodes)
               
-              // Scale down the group
-              group.scale.set(0.5, 0.5, 0.5)
-              
-              // Center the group
+              // Scale and center the model
               const box = new THREE.Box3().setFromObject(group)
-              const center = box.getCenter(new THREE.Vector3())
-              group.position.sub(center)
-              
-              // Adjust camera position based on model size
               const size = box.getSize(new THREE.Vector3())
               const maxDim = Math.max(size.x, size.y, size.z)
-              camera.position.z = maxDim * 2
+              const scale = 1 / maxDim
+              group.scale.setScalar(scale)
+              
+              const center = box.getCenter(new THREE.Vector3())
+              group.position.sub(center.multiplyScalar(scale))
+              
+              // Adjust camera for preview
+              if (containerId === 'details') {
+                camera.position.z = 3
+              } else {
+                camera.position.z = 2
+              }
               
               scene.add(group)
               modelsRef.current.set(containerId, group)
@@ -190,7 +205,6 @@ export function InventoryApp() {
         loadModel()
       }
 
-      // Return cleanup function
       return () => {
         cancelAnimationFrame(animationFrame)
         renderer.dispose()
@@ -212,17 +226,12 @@ export function InventoryApp() {
       if (cleanup) cleanupFunctions.push(cleanup)
     }
 
-    // Cleanup
     return () => {
       cleanupFunctions.forEach(cleanup => {
         if (typeof cleanup === 'function') {
           cleanup()
         }
       })
-      renderersRef.current.clear()
-      scenesRef.current.clear()
-      camerasRef.current.clear()
-      modelsRef.current.clear()
     }
   }, [items, selectedItem])
 
@@ -342,47 +351,52 @@ export function InventoryApp() {
     setSelectedItem(item)
   }
 
-  // Handle item use
+  // Handle item use with infinite check
   const handleUseItem = async (item) => {
     try {
-      // Place the item in the world
       const data = {
         id: uuid(),
         type: 'app',
         blueprint: item.blueprint,
-        position: [0, 1, 0], // Default position slightly above ground
+        position: [0, 1, 0],
         quaternion: [0, 0, 0, 1],
-        mover: window.world.network.id, // Start in moving mode
+        mover: window.world.network.id,
         uploader: null,
       }
       window.world.entities.add(data, true)
-      removeItem(item.id, 1)
+      
+      // Only remove item if not infinite
+      if (!infiniteItems.has(item.id)) {
+        removeItem(item.id, 1)
+      }
     } catch (err) {
       console.error('Failed to use item:', err)
     }
   }
 
-  // Handle item drop
+  // Handle item drop with infinite check
   const handleDropItem = async (item) => {
     try {
-      // Get player position and add slight offset
       const player = window.world.entities.player
       const position = [...player.base.position.toArray()]
-      position[1] += 0.5 // Slightly above ground
+      position[1] += 0.5
       
-      // Create the dropped item in world
       const data = {
         id: uuid(),
         type: 'app',
         blueprint: item.blueprint,
         position,
         quaternion: [0, 0, 0, 1],
-        mover: null, // Don't start in moving mode
+        mover: null,
         uploader: null,
-        scale: [0.3, 0.3, 0.3], // Make dropped items smaller
+        scale: [0.3, 0.3, 0.3],
       }
       window.world.entities.add(data, true)
-      removeItem(item.id, 1)
+      
+      // Only remove item if not infinite
+      if (!infiniteItems.has(item.id)) {
+        removeItem(item.id, 1)
+      }
     } catch (err) {
       console.error('Failed to drop item:', err)
     }
@@ -438,6 +452,22 @@ export function InventoryApp() {
       console.error('Failed to pick up item:', err)
     }
   }
+
+  // Toggle infinite status for an item
+  const toggleInfinite = (itemId) => {
+    setInfiniteItems(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+      return next
+    })
+  }
+
+  // Check if user is admin
+  const isAdmin = user?.roles?.includes('admin')
 
   // Expose methods for external use
   window.hyperFoneInventory = {
@@ -772,7 +802,7 @@ export function InventoryApp() {
               ref={el => el && modelContainersRef.current.set('details', el)}
               css={css`
                 aspect-ratio: 1;
-                background: rgba(0, 0, 0, 0.1);
+                background: rgba(0, 0, 0, 0.2);
                 border-radius: 8px;
                 margin-bottom: 20px;
                 overflow: hidden;
@@ -793,31 +823,57 @@ export function InventoryApp() {
                 {selectedItem.name}
               </h2>
               {activeTab === 'inventory' && (
-                <button
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    startEditingName(selectedItem)
-                  }}
-                  css={css`
-                    background: none;
-                    border: none;
-                    padding: 4px;
-                    color: rgba(255, 255, 255, 0.6);
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    opacity: 0.6;
-                    transition: opacity 0.2s;
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      startEditingName(selectedItem)
+                    }}
+                    css={css`
+                      background: none;
+                      border: none;
+                      padding: 4px;
+                      color: rgba(255, 255, 255, 0.6);
+                      cursor: pointer;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      opacity: 0.6;
+                      transition: opacity 0.2s;
 
-                    &:hover {
-                      opacity: 1;
-                    }
-                  `}
-                >
-                  <PencilIcon size={16} />
-                </button>
+                      &:hover {
+                        opacity: 1;
+                      }
+                    `}
+                  >
+                    <PencilIcon size={16} />
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => toggleInfinite(selectedItem.id)}
+                      css={css`
+                        background: none;
+                        border: none;
+                        padding: 4px;
+                        color: ${infiniteItems.has(selectedItem.id) ? '#551bf9' : 'rgba(255, 255, 255, 0.6)'};
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        opacity: 0.6;
+                        transition: all 0.2s;
+
+                        &:hover {
+                          opacity: 1;
+                          transform: scale(1.1);
+                        }
+                      `}
+                    >
+                      <InfinityIcon size={16} />
+                    </button>
+                  )}
+                </>
               )}
             </div>
             <p css={css`
@@ -830,6 +886,15 @@ export function InventoryApp() {
               {activeTab === 'world' && selectedItem.position && (
                 <div css={css`margin-top: 10px;`}>
                   Position: {selectedItem.position.map(n => n.toFixed(2)).join(', ')}
+                </div>
+              )}
+              {activeTab === 'inventory' && isAdmin && infiniteItems.has(selectedItem.id) && (
+                <div css={css`
+                  margin-top: 10px;
+                  color: #551bf9;
+                  font-style: italic;
+                `}>
+                  ∞ Infinite item
                 </div>
               )}
             </p>
