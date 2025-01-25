@@ -5,7 +5,7 @@ import { System } from './System'
 import { hashFile } from '../utils-client'
 import { hasRole, uuid } from '../utils'
 import { ControlPriorities } from '../extras/ControlPriorities'
-import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon } from 'lucide-react'
+import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon, SmartphoneIcon } from 'lucide-react'
 import { cloneDeep } from 'lodash-es'
 import moment from 'moment'
 
@@ -119,10 +119,29 @@ export class ClientEditor extends System {
         },
       })
       context.actions.push({
+        label: 'Add to HyperFone',
+        icon: SmartphoneIcon,
+        visible: true,
+        disabled: false,
+        onClick: () => {
+          this.setContext(null)
+          const blueprint = this.world.blueprints.get(entity.data.blueprint)
+          if (blueprint && window.hyperFoneInventory) {
+            window.hyperFoneInventory.addItem({
+              blueprint: entity.data.blueprint,
+              name: blueprint.name || 'Unnamed Item',
+              description: blueprint.description || '',
+              model: blueprint.model
+            })
+            entity.destroy(true)
+          }
+        },
+      })
+      context.actions.push({
         label: 'Duplicate',
         icon: CopyIcon,
         visible: isAdmin || isBuilder,
-        disabled: !!entity.data.uploader, // must be uploaded
+        disabled: !!entity.data.uploader,
         onClick: () => {
           this.setContext(null)
           const data = {
@@ -142,10 +161,9 @@ export class ClientEditor extends System {
         label: 'Unlink',
         icon: UnlinkIcon,
         visible: isAdmin || isBuilder,
-        disabled: !!entity.data.uploader, // must be uploaded
+        disabled: !!entity.data.uploader,
         onClick: () => {
           this.setContext(null)
-          // duplicate the blueprint
           const blueprint = {
             id: uuid(),
             version: 0,
@@ -154,7 +172,6 @@ export class ClientEditor extends System {
             config: cloneDeep(entity.blueprint.config),
           }
           this.world.blueprints.add(blueprint, true)
-          // assign new blueprint
           entity.modify({ blueprint: blueprint.id })
           this.world.network.send('entityModified', { id: entity.data.id, blueprint: blueprint.id })
         },
@@ -199,11 +216,9 @@ export class ClientEditor extends System {
   onDrop = e => {
     e.preventDefault()
     this.dropping = false
-    // ensure we have admin/builder role
     const roles = this.world.entities.player.data.user.roles
     const canDrop = hasRole(roles, 'admin', 'builder')
     if (!canDrop) return
-    // handle drop
     let file
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       const item = e.dataTransfer.items[0]
@@ -239,15 +254,10 @@ export class ClientEditor extends System {
   }
 
   async addModel(file) {
-    // immutable hash the file
     const hash = await hashFile(file)
-    // use hash as glb filename
     const filename = `${hash}.glb`
-    // canonical url to this file
     const url = `asset://${filename}`
-    // cache file locally so this client can insta-load it
     this.world.loader.insert('model', url, file)
-    // make blueprint
     const blueprint = {
       id: uuid(),
       version: 0,
@@ -255,14 +265,9 @@ export class ClientEditor extends System {
       script: null,
       config: {},
     }
-    // register blueprint
     this.world.blueprints.add(blueprint, true)
-    // get spawn point
     const hit = this.world.stage.raycastPointer(this.control.pointer.position)[0]
     const position = hit ? hit.point.toArray() : [0, 0, 0]
-    // spawn the app moving
-    // - mover: follows this clients cursor until placed
-    // - uploader: other clients see a loading indicator until its fully uploaded
     const data = {
       id: uuid(),
       type: 'app',
@@ -274,29 +279,21 @@ export class ClientEditor extends System {
       state: {},
     }
     const app = this.world.entities.add(data, true)
-    // upload the glb
     await this.world.network.upload(file)
-    // mark as uploaded so other clients can load it in
     app.onUploaded()
   }
 
   async addAvatar(file) {
-    // immutable hash the file
     const hash = await hashFile(file)
-    // use hash as vrm filename
     const filename = `${hash}.vrm`
-    // canonical url to this file
     const url = `asset://${filename}`
-    // cache file locally so this client can insta-load it
     this.world.loader.insert('avatar', url, file)
     this.world.emit('avatar', {
       file,
       url,
       hash,
       onPlace: async () => {
-        // close pane
         this.world.emit('avatar', null)
-        // make blueprint
         const blueprint = {
           id: uuid(),
           version: 0,
@@ -304,14 +301,9 @@ export class ClientEditor extends System {
           script: null,
           config: {},
         }
-        // register blueprint
         this.world.blueprints.add(blueprint, true)
-        // get spawn point
         const hit = this.world.stage.raycastPointer(this.control.pointer.position)[0]
         const position = hit ? hit.point.toArray() : [0, 0, 0]
-        // spawn the app moving
-        // - mover: follows this clients cursor until placed
-        // - uploader: other clients see a loading indicator until its fully uploaded
         const data = {
           id: uuid(),
           type: 'app',
@@ -323,31 +315,23 @@ export class ClientEditor extends System {
           state: {},
         }
         const app = this.world.entities.add(data, true)
-        // upload the glb
         await this.world.network.upload(file)
-        // mark as uploaded so other clients can load it in
         app.onUploaded()
       },
       onEquip: async () => {
-        // close pane
         this.world.emit('avatar', null)
-        // prep new user data
         const player = this.world.entities.player
         const prevUser = player.data.user
         const newUser = cloneDeep(player.data.user)
         newUser.avatar = url
-        // update locally
         player.modify({ user: newUser })
-        // upload
         try {
           await this.world.network.upload(file)
         } catch (err) {
           console.error(err)
-          // revert
           player.modify({ user: prevUser })
           return
         }
-        // update for everyone
         this.world.network.send('entityModified', {
           id: player.data.id,
           user: newUser,
