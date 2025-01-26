@@ -4,6 +4,8 @@ import { themes, defaultWallpaper } from './themes'
 import { hyperFoneOS } from '../hyperfoneOS'
 import { useAuthContext } from '../../components/AuthProvider'
 import { createClient } from 'matrix-js-sdk'
+import moment from 'moment'
+import { v4 as uuid } from 'uuid'
 
 // Add developer mode state
 const DEVELOPER_MODE_TAPS = 7
@@ -62,6 +64,13 @@ export function Settings({
   const [buildTaps, setBuildTaps] = useState(0)
   const [isDeveloperMode, setIsDeveloperMode] = useState(false)
   const buildTapTimeout = useRef(null)
+
+  // Add effect to initialize username from player data
+  useEffect(() => {
+    if (window.world?.entities?.player?.data?.user?.name) {
+      setUsername(window.world.entities.player.data.user.name)
+    }
+  }, [])
 
   // Initialize Matrix client
   useEffect(() => {
@@ -477,25 +486,52 @@ export function Settings({
                   `}>
                     Username
                   </label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Enter username"
-                    css={css`
-                      background: ${theme.background}dd;
-                      border: 1px solid ${theme.primary}44;
-                      color: ${theme.text};
-                      padding: 12px;
-                      border-radius: 8px;
-                      font-size: 14px;
-                      
-                      &:focus {
-                        outline: none;
-                        border-color: ${theme.primary};
-                      }
-                    `}
-                  />
+                  <div css={css`
+                    display: flex;
+                    gap: 8px;
+                  `}>
+                    <input
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="Enter username"
+                      css={css`
+                        flex: 1;
+                        background: ${theme.background}dd;
+                        border: 1px solid ${theme.primary}44;
+                        color: ${theme.text};
+                        padding: 12px;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        
+                        &:focus {
+                          outline: none;
+                          border-color: ${theme.primary};
+                        }
+                      `}
+                    />
+                    <button
+                      onClick={() => handleSaveUsername(username)}
+                      css={css`
+                        background: ${theme.primary}22;
+                        border: 1px solid ${theme.primary}44;
+                        color: ${theme.primary};
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        
+                        &:hover {
+                          background: ${theme.primary}33;
+                          border-color: ${theme.primary};
+                          transform: translateY(-2px);
+                        }
+                      `}
+                    >
+                      Save
+                    </button>
+                  </div>
                 </div>
 
                 {/* Bio */}
@@ -2095,6 +2131,24 @@ export function Settings({
       default:
         return null
     }
+  }
+
+  // Modify username save logic
+  const handleSaveUsername = (newUsername) => {
+    if (!newUsername || newUsername === username) return
+    
+    // Update chat name using /name command
+    const msg = {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `/name ${newUsername}`,
+      createdAt: moment().toISOString(),
+    }
+    window.world.chat.add(msg, true)
+    
+    // Update local state
+    setUsername(newUsername)
   }
 
   return (

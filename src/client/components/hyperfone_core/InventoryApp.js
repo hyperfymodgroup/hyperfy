@@ -15,95 +15,73 @@ function ModelPreview({ blueprint, size = 150 }) {
   const containerRef = useRef()
 
   useEffect(() => {
-    if (!containerRef.current || !blueprint || !window.world?.blueprints) return
+    if (!containerRef.current || !blueprint) return
+    
+    const blueprintData = window.world.blueprints.get(blueprint)
+    if (!blueprintData?.model) return
 
-    const loadModel = async () => {
-      try {
-        const blueprintData = window.world.blueprints.get(blueprint)
-        if (!blueprintData?.model) return
+    // Create basic Three.js setup
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000)
+    camera.position.set(0, 0.5, 2)
+    camera.lookAt(0, 0, 0)
 
-        // Get model from loader
-        let model = window.world.loader.get('model', blueprintData.model)
-        if (!model) {
-          model = await window.world.loader.load('model', blueprintData.model)
-        }
+    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    renderer.setSize(size, size)
+    renderer.setClearColor(0x000000, 0)
+    containerRef.current.innerHTML = ''
+    containerRef.current.appendChild(renderer.domElement)
 
-        if (model) {
-          // Create scene
-          const scene = new THREE.Scene()
-          const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000)
-          camera.position.set(0, 0.5, 2)
-          camera.lookAt(0, 0, 0)
+    // Add light
+    const light = new THREE.AmbientLight(0xffffff, 1)
+    scene.add(light)
 
-          const renderer = new THREE.WebGLRenderer({ 
-            antialias: true,
-            alpha: true 
-          })
-          renderer.setSize(size, size)
-          renderer.setClearColor(0x000000, 0)
-          containerRef.current.innerHTML = ''
-          containerRef.current.appendChild(renderer.domElement)
+    // Get model from loader
+    const model = window.world.loader.get('model', blueprintData.model)
+    if (model?.scene) {
+      const modelScene = model.scene.clone()
+      scene.add(modelScene)
 
-          // Add light
-          const light = new THREE.AmbientLight(0xffffff, 1)
-          scene.add(light)
+      // Auto-scale model
+      const box = new THREE.Box3().setFromObject(modelScene)
+      const modelSize = box.getSize(new THREE.Vector3())
+      const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z)
+      const scale = 1 / maxDim
+      modelScene.scale.setScalar(scale)
 
-          // Add model using Hyperfy's node system
-          const modelNode = model.toNodes()
-          scene.add(modelNode)
+      // Center model
+      const center = box.getCenter(new THREE.Vector3())
+      modelScene.position.sub(center.multiplyScalar(scale))
 
-          // Auto-scale model
-          const box = new THREE.Box3().setFromObject(modelNode)
-          const modelSize = box.getSize(new THREE.Vector3())
-          const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z)
-          const scale = 1.2 / maxDim
-          modelNode.scale.setScalar(scale)
+      // Animation loop
+      function animate() {
+        modelScene.rotation.y += 0.01
+        renderer.render(scene, camera)
+        return requestAnimationFrame(animate)
+      }
+      const animationFrame = animate()
 
-          // Center model
-          const center = box.getCenter(new THREE.Vector3())
-          modelNode.position.sub(center.multiplyScalar(scale))
-          modelNode.position.y -= 0.1
-
-          // Simple rotation animation
-          const animate = () => {
-            modelNode.rotation.y += 0.01
-            renderer.render(scene, camera)
-            return requestAnimationFrame(animate)
-          }
-
-          const animationFrame = requestAnimationFrame(animate)
-
-          return () => {
-            cancelAnimationFrame(animationFrame)
-            renderer.dispose()
-            if (containerRef.current) {
-              containerRef.current.innerHTML = ''
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to load model:', err)
+      return () => {
+        cancelAnimationFrame(animationFrame)
+        renderer.dispose()
+        containerRef.current?.remove()
       }
     }
 
-    const cleanup = loadModel()
     return () => {
-      if (cleanup && typeof cleanup.then === 'function') {
-        cleanup.then(cleanupFn => cleanupFn && cleanupFn())
-      }
-      if (containerRef.current) {
-        containerRef.current.innerHTML = ''
-      }
+      renderer.dispose()
+      containerRef.current?.remove()
     }
   }, [blueprint, size])
 
   return (
     <div 
-      ref={containerRef}
-      css={css`
-        width: ${size}px;
-        height: ${size}px;
-      `}
+      ref={containerRef} 
+      style={{ 
+        width: size, 
+        height: size,
+        background: '#000'
+      }} 
     />
   )
 }
@@ -413,23 +391,33 @@ export function InventoryApp() {
       try {
         const blueprint = window.world.blueprints.get(newItem.blueprint)
         if (blueprint) {
-          // Get model and try to find rigidbody name
+          // Get model and try to find a good name
           let model = window.world.loader.get('model', blueprint.model)
-          let rigidBodyName = 'Unnamed Item'
+          let itemName = 'Unnamed Item'
           
-          if (model) {
-            const modelNode = model.toNodes()
-            modelNode.traverse(node => {
-              if (node.name === 'rigidbody') {
-                rigidBodyName = node.parent?.name || 'Unnamed Item'
+          if (model?.scene) {
+            // Try to find the best name by traversing the scene
+            model.scene.traverse(node => {
+              // Skip empty names or common technical names
+              if (!node.name || 
+                  node.name.toLowerCase().includes('scene') || 
+                  node.name.toLowerCase().includes('root') ||
+                  node.name.toLowerCase() === 'rigidbody') {
+                return
               }
+              
+              // Found a good name
+              itemName = node.name
+                .replace(/_/g, ' ')  // Replace underscores with spaces
+                .replace(/([A-Z])/g, ' $1') // Add spaces before capitals
+                .trim()
             })
           }
 
           itemData = {
             ...itemData,
             model: blueprint.model,
-            name: rigidBodyName,
+            name: itemName,
             description: blueprint.description || ''
           }
         }
@@ -851,17 +839,107 @@ export function InventoryApp() {
                       align-items: center;
                       gap: 8px;
                     `}>
-                      <div css={css`
-                        color: #00ffff;
-                        font-size: 12px;
-                        font-weight: 500;
-                        white-space: nowrap;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                        flex: 1;
-                      `}>
-                        {item.name}
-                      </div>
+                      {editingName === item.id ? (
+                        <input
+                          type="text"
+                          value={editingNameValue}
+                          onChange={(e) => setEditingNameValue(e.target.value)}
+                          onBlur={saveEditingName}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEditingName()
+                            if (e.key === 'Escape') {
+                              setEditingName(null)
+                              setEditingNameValue('')
+                            }
+                          }}
+                          autoFocus
+                          css={css`
+                            flex: 1;
+                            background: #00000088;
+                            border: 1px solid #00ffff;
+                            color: #00ffff;
+                            padding: 4px 8px;
+                            font-family: 'Courier New', monospace;
+                            font-size: 12px;
+                            outline: none;
+                            
+                            &:focus {
+                              box-shadow: 0 0 10px #00ffff44;
+                            }
+                          `}
+                        />
+                      ) : (
+                        <div css={css`
+                          color: #00ffff;
+                          font-size: 12px;
+                          font-weight: 500;
+                          white-space: nowrap;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                          flex: 1;
+                          display: flex;
+                          align-items: center;
+                          gap: 6px;
+                        `}>
+                          {item.name}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              startEditingName(item)
+                            }}
+                            css={css`
+                              background: none;
+                              border: none;
+                              padding: 2px;
+                              color: #00ffff44;
+                              cursor: pointer;
+                              transition: all 0.2s;
+                              opacity: 0;
+
+                              &:hover {
+                                color: #00ffff;
+                                transform: scale(1.1);
+                              }
+
+                              ${selectedItem?.id === item.id ? 'opacity: 1;' : ''}
+                              div:hover & {
+                                opacity: 1;
+                              }
+                            `}
+                          >
+                            <PencilIcon size={12} />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleInfinite(item.id)
+                              }}
+                              css={css`
+                                background: none;
+                                border: none;
+                                padding: 2px;
+                                color: ${infiniteItems.has(item.id) ? '#00ffff' : '#00ffff44'};
+                                cursor: pointer;
+                                transition: all 0.2s;
+                                opacity: 0;
+
+                                &:hover {
+                                  color: #00ffff;
+                                  transform: scale(1.1);
+                                }
+
+                                ${selectedItem?.id === item.id ? 'opacity: 1;' : ''}
+                                div:hover & {
+                                  opacity: 1;
+                                }
+                              `}
+                            >
+                              <InfinityIcon size={12} />
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {activeTab === 'inventory' && (
                         <div css={css`
                           font-size: 12px;
