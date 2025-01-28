@@ -3,14 +3,8 @@ import { createNode } from './createNode'
 const groupTypes = ['Scene', 'Group', 'Object3D']
 
 export function glbToNodes(glb, world) {
-  const nodes = new Map()
   function registerNode(data) {
     const node = createNode(data)
-    if (nodes.has(node.id)) {
-      console.error('node with id already exists:', node.id)
-      return
-    }
-    nodes.set(node.id, node)
     return node
   }
   const materials = {}
@@ -59,6 +53,7 @@ export function glbToNodes(glb, world) {
           type: 'geometry',
           geometry: object3d.geometry,
           convex: props.convex,
+          trigger: props.trigger,
           position: object3d.position.toArray(),
           quaternion: object3d.quaternion.toArray(),
           scale: object3d.scale.toArray(),

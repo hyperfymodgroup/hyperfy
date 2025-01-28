@@ -17,6 +17,7 @@ const names = [
   'fileDownloadStart',
   'fileDownloadChunk',
   'fileDownloadComplete'
+  'playerTeleport',
 ]
 
 const byName = {}

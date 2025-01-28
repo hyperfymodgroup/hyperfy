@@ -1,6 +1,15 @@
 import { css } from '@firebolt-dev/css'
 import { useEffect, useRef, useState } from 'react'
-import { BoxIcon, EyeIcon, FileCode2Icon, FileIcon, LoaderIcon, XIcon } from 'lucide-react'
+import {
+  BoxIcon,
+  CircleCheckIcon,
+  EyeIcon,
+  FileCode2Icon,
+  FileIcon,
+  LoaderIcon,
+  PackageCheckIcon,
+  XIcon,
+} from 'lucide-react'
 
 import { hashFile } from '../../core/utils-client'
 import { usePane } from './usePane'
@@ -16,16 +25,30 @@ export function InspectPane({ world, entity }) {
   }
 }
 
+const extToType = {
+  glb: 'model',
+  vrm: 'avatar',
+}
 const allowedModels = ['glb', 'vrm']
 export function AppPane({ world, app }) {
   const paneRef = useRef()
   const headRef = useRef()
+  const [blueprint, setBlueprint] = useState(app.blueprint)
   usePane('inspect', paneRef, headRef)
   useEffect(() => {
     window.app = app
   }, [])
+  useEffect(() => {
+    const onModify = bp => {
+      if (bp.id !== blueprint.id) return
+      setBlueprint(bp)
+    }
+    world.blueprints.on('modify', onModify)
+    return () => {
+      world.blueprints.off('modify', onModify)
+    }
+  }, [])
   const changeModel = async e => {
-    const blueprint = app.blueprint
     const file = e.target.files[0]
     if (!file) return
     const ext = file.name.split('.').pop()
@@ -37,7 +60,8 @@ export function AppPane({ world, app }) {
     // canonical url to this file
     const url = `asset://${filename}`
     // cache file locally so this client can insta-load it
-    world.loader.insert(ext, url, file)
+    const type = extToType[ext]
+    world.loader.insert(type, url, file)
     // update blueprint locally (also rebuilds apps)
     const version = blueprint.version + 1
     world.blueprints.modify({ id: blueprint.id, version, model: url })
@@ -46,8 +70,12 @@ export function AppPane({ world, app }) {
     // broadcast blueprint change to server + other clients
     world.network.send('blueprintModified', { id: blueprint.id, version, model: url })
   }
-  const name = app.blueprint.name || ''
-  const desc = app.blueprint.desc || ''
+  const togglePreload = async () => {
+    const preload = !blueprint.preload
+    const version = blueprint.version + 1
+    world.blueprints.modify({ id: blueprint.id, version, preload })
+    world.network.send('blueprintModified', { id: blueprint.id, version, preload })
+  }
   return (
     <div
       ref={paneRef}
@@ -133,56 +161,67 @@ export function AppPane({ world, app }) {
         }
         .apane-top {
           display: flex;
-          margin: -5px -5px 15px;
+          gap: 10px;
+          margin: 0 0 10px;
           &-item {
-            flex-basis: 50%;
+            flex: 1;
             padding: 5px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #252630;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 75px;
+            cursor: pointer;
+            &-icon {
+              line-height: 0;
+              margin: 0 0 4px;
+            }
+            span {
+              font-size: 14px;
+            }
+            &.model {
+              overflow: hidden;
+              input {
+                position: absolute;
+                top: -9999px;
+                left: -9999px;
+              }
+            }
           }
         }
-        .apane-model {
+        .apane-lilbtns {
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          background: #252630;
-          border-radius: 10px;
-          margin: 0 0 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 75px;
-          overflow: hidden;
-          cursor: pointer;
-          &-icon {
-            line-height: 0;
-            margin: 0 0 4px;
-          }
-          span {
-            font-size: 14px;
-          }
-          input {
-            position: absolute;
-            top: -9999px;
-            left: -9999px;
-          }
-        }
-        .apane-script {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          background: #252630;
-          border-radius: 10px;
-          margin: 0 0 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 75px;
-          cursor: pointer;
-          &-icon {
-            line-height: 0;
-            margin: 0 0 4px;
-          }
-          span {
-            font-size: 14px;
+          gap: 10px;
+          margin: 0 0 20px;
+          &-btn {
+            flex: 1;
+            background: #252630;
+            border-radius: 10px;
+            padding: 8px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            svg {
+              margin: 0 0 4px;
+              opacity: 0.3;
+            }
+            span {
+              font-size: 12px;
+              opacity: 0.3;
+            }
+            &.active {
+              svg {
+                opacity: 1;
+              }
+              span {
+                opacity: 1;
+              }
+            }
           }
         }
       `}
@@ -196,25 +235,30 @@ export function AppPane({ world, app }) {
       </div>
       <div className='apane-content noscrollbar'>
         <div className='apane-top'>
-          <div className='apane-top-item'>
-            <label className='apane-model'>
-              <input type='file' accept='.glb,.vrm' onChange={changeModel} />
-              <div className='apane-model-icon'>
-                <BoxIcon size={20} />
-              </div>
-              <span>Model</span>
-            </label>
-          </div>
-          <div className='apane-top-item'>
-            <div className='apane-script' onClick={() => world.emit('code', app)}>
-              <div className='apane-script-icon'>
-                <FileCode2Icon size={20} />
-              </div>
-              <span>Script</span>
+          <label className='apane-top-item model'>
+            <input type='file' accept='.glb,.vrm' onChange={changeModel} />
+            <div className='apane-model-icon'>
+              <BoxIcon size={20} />
             </div>
+            <span>Model</span>
+          </label>
+          <div className='apane-top-item script' onClick={() => world.emit('code', true)}>
+            <div className='apane-script-icon'>
+              <FileCode2Icon size={20} />
+            </div>
+            <span>Script</span>
           </div>
         </div>
-        <Fields app={app} />
+        <div className='apane-lilbtns'>
+          <div className={cls('apane-lilbtns-btn', { active: blueprint.preload })} onClick={togglePreload}>
+            <CircleCheckIcon size={16} />
+            <span>Preload</span>
+          </div>
+          <div className='apane-lilbtns-btn'></div>
+          <div className='apane-lilbtns-btn'></div>
+          <div className='apane-lilbtns-btn'></div>
+        </div>
+        <Fields app={app} blueprint={blueprint} />
         {/* <div className='apane-info'>
           <div className='apane-info-main'>
             <label className='apane-info-name'>
@@ -235,21 +279,14 @@ function PlayerPane({ world, player }) {
   return <div>PLAYER INSPECT</div>
 }
 
-function Fields({ app }) {
+function Fields({ app, blueprint }) {
   const world = app.world
-  const [blueprint, setBlueprint] = useState(app.blueprint)
   const [fields, setFields] = useState(app.getConfig?.() || [])
   const config = blueprint.config
   useEffect(() => {
     app.onConfigure = fn => setFields(fn?.() || [])
-    const onModify = bp => {
-      if (bp.id === blueprint.id) {
-        setBlueprint(bp)
-      }
-    }
-    world.blueprints.on('modify', onModify)
     return () => {
-      world.blueprints.off('modify', onModify)
+      app.onConfigure = null
     }
   }, [])
   const modify = (key, value) => {
@@ -413,10 +450,44 @@ function FieldTextArea({ world, field, value, modify }) {
 }
 
 const supportedFiles = ['glb', 'vrm']
+const kinds = {
+  avatar: {
+    type: 'avatar',
+    accept: '.vrm',
+    exts: ['vrm'],
+    placeholder: '.vrm',
+  },
+  emote: {
+    type: 'emote',
+    accept: '.glb',
+    exts: ['glb'],
+    placeholder: '.glb',
+  },
+  model: {
+    type: 'model',
+    accept: '.glb',
+    exts: ['glb'],
+    placeholder: '.glb',
+  },
+  texture: {
+    type: 'texture',
+    accept: '.jpg,.jpeg,.png',
+    exts: ['jpg', 'jpeg', 'png'],
+    placeholder: '.jpg / .png',
+  },
+  hdr: {
+    type: 'hdr',
+    accept: '.hdr',
+    exts: ['hdr'],
+    placeholder: '.hdr',
+  },
+}
 function FieldFile({ world, field, value, modify }) {
   const nRef = useRef(0)
   const update = useUpdate()
   const [loading, setLoading] = useState(null)
+  const kind = kinds[field.kind]
+  if (!kind) return null
   const set = async e => {
     // trigger input rebuild
     const n = ++nRef.current
@@ -426,8 +497,8 @@ function FieldFile({ world, field, value, modify }) {
     if (!file) return
     // check ext
     const ext = file.name.split('.')[1]
-    if (!supportedFiles.includes(ext)) {
-      return console.error(`file extension not supported: ${ext}`)
+    if (!kind.exts.includes(ext)) {
+      return console.error(`attempted invalid file extension for ${field.kind}: ${ext}`)
     }
     // immutable hash the file
     const hash = await hashFile(file)
@@ -437,6 +508,7 @@ function FieldFile({ world, field, value, modify }) {
     const url = `asset://${filename}`
     // show loading
     const newValue = {
+      type: kind.type,
       name: file.name,
       url,
     }
@@ -447,7 +519,7 @@ function FieldFile({ world, field, value, modify }) {
     // ignore if new value/upload
     if (nRef.current !== n) return
     // cache file locally so this client can insta-load it
-    world.loader.insert(ext, url, file)
+    world.loader.insert(kind.type, url, file)
     // apply!
     setLoading(null)
     modify(field.key, newValue)
@@ -521,7 +593,7 @@ function FieldFile({ world, field, value, modify }) {
         `}
       >
         <FileIcon size={14} />
-        {!value && !loading && <div className='field-file-placeholder'>{field.placeholder}</div>}
+        {!value && !loading && <div className='field-file-placeholder'>{kind.placeholder}</div>}
         {label && <div className='field-file-name'>{label}</div>}
         {value && !loading && (
           <div className='field-file-x'>
@@ -533,7 +605,7 @@ function FieldFile({ world, field, value, modify }) {
             <LoaderIcon size={14} />
           </div>
         )}
-        <input key={n} type='file' onChange={set} accept={field.accept} />
+        <input key={n} type='file' onChange={set} accept={kind.accept} />
       </label>
     </FieldWithLabel>
   )

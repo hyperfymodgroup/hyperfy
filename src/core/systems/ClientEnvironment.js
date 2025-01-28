@@ -43,22 +43,38 @@ const csmLevels = {
   },
 }
 
+const defaults = {
+  sky: '/day2-2k.jpg',
+  hdr: '/day2.hdr',
+}
+
 /**
  * Environment System
  *
  * - Runs on the client
- * - Sets up the sun, shadows, fog, skybox etc
+ * - Sets up the sky, hdr, sun, shadows, fog etc
  *
  */
 export class ClientEnvironment extends System {
   constructor(world) {
     super(world)
+
+    this.sky = null
+    this.skyUrl = null
+    this.skyN = 0
+    this.skys = []
+
+    this.hdr = null
+    this.hdrUrl = null
+    this.hdrN = 0
+    this.hdrs = []
   }
 
   async start() {
-    this.buildHDR()
     this.buildCSM()
-    this.buildFog()
+    this.updateSky()
+    this.updateHDR()
+
     this.world.client.settings.on('change', this.onSettingsChange)
     this.world.graphics.on('resize', this.onViewportResize)
 
@@ -68,43 +84,84 @@ export class ClientEnvironment extends System {
     // ground
     const glb = await this.world.loader.load('model', '/base-environment.glb')
     const root = glb.toNodes()
-    root.activate({ world: this.world, physics: true })
-    // sky
-    const skyUrl = '/day2-2k.jpg'
-    this.world.loader.load('tex', skyUrl).then(texture => {
-      texture = texture.clone()
-      texture.minFilter = texture.magFilter = THREE.LinearFilter
-      texture.mapping = THREE.EquirectangularReflectionMapping
-      // texture.encoding = Encoding[this.encoding]
-      texture.colorSpace = THREE.SRGBColorSpace
+    root.activate({ world: this.world, physics: true, label: 'base-environment' })
+  }
+
+  addSky(url) {
+    const handle = {
+      url,
+      destroy: () => {
+        const idx = this.skys.indexOf(handle)
+        if (idx === -1) return
+        this.skys.splice(idx, 1)
+        this.updateSky()
+      },
+    }
+    this.skys.push(handle)
+    this.updateSky()
+    return handle
+  }
+
+  async updateSky() {
+    const url = this.skys[this.skys.length - 1]?.url || defaults.sky
+    if (this.skyUrl === url) return
+    this.skyUrl = url
+    if (!this.sky) {
       const geometry = new THREE.SphereGeometry(1000, 60, 40)
       const material = new THREE.MeshBasicMaterial({ side: THREE.BackSide })
-      const mesh = new THREE.Mesh(geometry, material)
-      mesh.geometry.computeBoundsTree()
-      mesh.material.map = texture
-      mesh.material.needsUpdate = true
-      mesh.material.fog = false
-      mesh.material.toneMapped = false
-      mesh.matrixAutoUpdate = false
-      mesh.matrixWorldAutoUpdate = false
-      this.world.stage.scene.add(mesh)
-    })
+      this.sky = new THREE.Mesh(geometry, material)
+      this.sky.geometry.computeBoundsTree()
+      this.sky.material.needsUpdate = true
+      this.sky.material.fog = false
+      this.sky.material.toneMapped = false
+      this.sky.matrixAutoUpdate = false
+      this.sky.matrixWorldAutoUpdate = false
+      this.sky.visible = false
+      this.world.stage.scene.add(this.sky)
+    }
+    const n = ++this.skyN
+    const texture = await this.world.loader.load('texture', url)
+    if (n !== this.skyN) return
+    // texture = texture.clone()
+    texture.minFilter = texture.magFilter = THREE.LinearFilter
+    texture.mapping = THREE.EquirectangularReflectionMapping
+    // texture.encoding = Encoding[this.encoding]
+    texture.colorSpace = THREE.SRGBColorSpace
+    this.sky.material.map = texture
+    this.sky.visible = true
   }
 
-  update(delta) {
-    this.csm.update()
-    // this.foo.rotation.y += 0.5 * delta
+  addHDR(url) {
+    const handle = {
+      url,
+      destroy: () => {
+        const idx = this.hdrs.indexOf(handle)
+        if (idx === -1) return
+        this.hdrs.splice(idx, 1)
+        this.updateHDR()
+      },
+    }
+    this.hdrs.push(handle)
+    this.updateHDR()
+    return handle
   }
 
-  async buildHDR() {
-    // const url = '/dusk3.hdr'
-    const url = '/day2.hdr'
+  async updateHDR() {
+    const url = this.hdrs[this.hdrs.length - 1]?.url || defaults.hdr
+    if (this.hdrUrl === url) return
+    this.hdrUrl = url
+    const n = ++this.hdrN
     const texture = await this.world.loader.load('hdr', url)
+    if (n !== this.hdrN) return
     // texture.colorSpace = THREE.NoColorSpace
     // texture.colorSpace = THREE.SRGBColorSpace
     // texture.colorSpace = THREE.LinearSRGBColorSpace
     texture.mapping = THREE.EquirectangularReflectionMapping
     this.world.stage.scene.environment = texture
+  }
+
+  update(delta) {
+    this.csm.update()
   }
 
   buildCSM() {
@@ -148,10 +205,6 @@ export class ClientEnvironment extends System {
         light.castShadow = false
       }
     }
-  }
-
-  buildFog() {
-    // ...
   }
 
   onSettingsChange = changes => {

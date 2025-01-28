@@ -53,7 +53,7 @@ export class Physics extends System {
     this.physics = PHYSX.CreatePhysics(this.version, this.foundation, this.tolerances)
     this.defaultMaterial = this.physics.createMaterial(0.2, 0.2, 0.2)
 
-    this.contactsResult = new ContactsResult()
+    this.contactEvent = new ContactEvent()
     const contactPoints = new PHYSX.PxArray_PxContactPairPoint(64)
     const simulationEventCallback = new PHYSX.PxSimulationEventCallbackImpl()
     simulationEventCallback.onContact = (pairHeader, pairs, count) => {
@@ -61,7 +61,7 @@ export class Physics extends System {
       const handle0 = this.handles.get(pairHeader.get_actors(0)?.ptr)
       const handle1 = this.handles.get(pairHeader.get_actors(1)?.ptr)
       if (!handle0 || !handle1) return
-      this.contactsResult.clear()
+      this.contactEvent.clear()
       for (let i = 0; i < count; i++) {
         const pair = PHYSX.NativeArrayHelpers.prototype.getContactPairAt(pairs, i)
         if (pair.events.isSet(PHYSX.PxPairFlagEnum.eNOTIFY_TOUCH_FOUND)) {
@@ -69,34 +69,54 @@ export class Physics extends System {
           if (pxContactPoints > 0) {
             for (let j = 0; j < pxContactPoints; j++) {
               const contact = contactPoints.get(j)
-              this.contactsResult.add(contact.position, contact.normal, contact.impulse)
+              this.contactEvent.add(contact.position, contact.normal, contact.impulse)
             }
           }
-          const result = this.contactsResult.get()
+          const e = this.contactEvent.get()
           if (!handle0.contactedHandles.has(handle1)) {
-            result.tag = handle1.tag
-            // result.isAuthority = handle1.isAuthority
-            handle0.onContactStart?.(result)
+            e.tag = handle1.tag
+            e.player = handle1.player
+            // e.isAuthority = handle1.isAuthority
+            try {
+              handle0.onContactStart?.(e)
+            } catch (err) {
+              console.error(err)
+            }
             handle0.contactedHandles.add(handle1)
           }
           if (!handle1.contactedHandles.has(handle0)) {
-            result.tag = handle0.tag
-            // result.isAuthority = handle0.isAuthority
-            handle1.onContactStart?.(result)
+            e.tag = handle0.tag
+            e.player = handle0.player
+            // e.isAuthority = handle0.isAuthority
+            try {
+              handle1.onContactStart?.(e)
+            } catch (err) {
+              console.error(err)
+            }
             handle1.contactedHandles.add(handle0)
           }
         } else if (pair.events.isSet(PHYSX.PxPairFlagEnum.eNOTIFY_TOUCH_LOST)) {
-          const result = this.contactsResult.get()
+          const e = this.contactEvent.get()
           if (handle0.contactedHandles.has(handle1)) {
-            result.tag = handle1.tag
-            // result.isAuthority = handle1.isAuthority
-            handle0.onContactEnd?.(result)
+            e.tag = handle1.tag
+            e.tag = handle1.player
+            // e.isAuthority = handle1.isAuthority
+            try {
+              handle0.onContactEnd?.(e)
+            } catch (err) {
+              console.error(err)
+            }
             handle0.contactedHandles.delete(handle1)
           }
           if (handle1.contactedHandles.has(handle0)) {
-            result.tag = handle0.tag
-            // result.isAuthority = handle0.isAuthority
-            handle1.onContactEnd?.(result)
+            e.tag = handle0.tag
+            e.player = handle0.player
+            // e.isAuthority = handle0.isAuthority
+            try {
+              handle1.onContactEnd?.(e)
+            } catch (err) {
+              console.error(err)
+            }
             handle1.contactedHandles.delete(handle0)
           }
         }
@@ -238,28 +258,41 @@ export class Physics extends System {
     }
     this.handles.set(actor.ptr, handle)
     this.scene.addActor(actor)
-    return () => {
-      // end any contacts
-      if (handle.contactedHandles.size) {
-        this.contactsResult.clear()
-        const result = this.contactsResult.get()
-        for (const otherHandle of handle.contactedHandles) {
-          result.tag = handle.tag
-          otherHandle.onContactEnd?.(result)
-          otherHandle.contactedHandles.delete(handle)
+    return {
+      snap: pose => {
+        actor.setGlobalPose(pose)
+        handle.interpolation.prev.position.copy(pose.p)
+        handle.interpolation.prev.quaternion.copy(pose.q)
+        handle.interpolation.next.position.copy(pose.p)
+        handle.interpolation.next.quaternion.copy(pose.q)
+        handle.interpolation.curr.position.copy(pose.p)
+        handle.interpolation.curr.quaternion.copy(pose.q)
+        handle.interpolation.skip = true
+      },
+      destroy: () => {
+        // end any contacts
+        if (handle.contactedHandles.size) {
+          this.contactEvent.clear()
+          const e = this.contactEvent.get()
+          for (const otherHandle of handle.contactedHandles) {
+            e.tag = handle.tag
+            e.player = handle.player
+            otherHandle.onContactEnd?.(e)
+            otherHandle.contactedHandles.delete(handle)
+          }
         }
-      }
-      // end any triggers
-      if (handle.triggeredHandles.size) {
-        for (const triggerHandle of handle.triggeredHandles) {
-          triggerResult.tag = handle.tag
-          triggerHandle.onTriggerLeave?.(triggerResult)
+        // end any triggers
+        if (handle.triggeredHandles.size) {
+          for (const triggerHandle of handle.triggeredHandles) {
+            triggerResult.tag = handle.tag
+            triggerHandle.onTriggerLeave?.(triggerResult)
+          }
         }
-      }
-      // remove from scene
-      this.scene.removeActor(actor)
-      // delete data
-      this.handles.delete(actor.ptr)
+        // remove from scene
+        this.scene.removeActor(actor)
+        // delete data
+        this.handles.delete(actor.ptr)
+      },
     }
   }
 
@@ -296,6 +329,10 @@ export class Physics extends System {
   preUpdate(alpha) {
     for (const handle of this.active) {
       const lerp = handle.interpolation
+      if (lerp.skip) {
+        lerp.skip = false
+        continue
+      }
       lerp.curr.position.lerpVectors(lerp.prev.position, lerp.next.position, alpha)
       lerp.curr.quaternion.slerpQuaternions(lerp.prev.quaternion, lerp.next.quaternion, alpha)
       handle.onInterpolate(lerp.curr.position, lerp.curr.quaternion)
@@ -316,7 +353,11 @@ export class Physics extends System {
   // }
 
   setGlobalPose(actor, matrix) {
-    if (this.ignoreSetGlobalPose) return
+    // ignore interpolation loopback commits for dynamic actors
+    if (this.ignoreSetGlobalPose) {
+      const isDynamic = !actor.getRigidBodyFlags?.().isSet(PHYSX.PxRigidBodyFlagEnum.eKINEMATIC)
+      if (isDynamic) return
+    }
     matrix.toPxTransform(this.transform)
     actor.setGlobalPose(this.transform, true)
   }
@@ -403,7 +444,7 @@ export class Physics extends System {
   }
 }
 
-class ContactsResult {
+class ContactEvent {
   constructor() {
     this.pool = []
     this.idx = 0

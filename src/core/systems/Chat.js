@@ -28,6 +28,10 @@ export class Chat extends System {
       for (const callback of this.listeners) {
         callback(this.msgs)
       }
+      if (msg.fromId) {
+        const player = this.world.entities.getPlayer(msg.fromId)
+        player?.chat(msg.body)
+      }
     }
     if (broadcast) {
       this.world.network.send('chatAdded', msg)

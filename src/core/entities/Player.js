@@ -18,33 +18,6 @@ export class Player extends Entity {
     this.player.modify(data)
   }
 
-  getProxy() {
-    if (!this.proxy) {
-      const player = this.player
-      const position = new THREE.Vector3()
-      const rotation = new THREE.Euler()
-      const quaternion = new THREE.Quaternion()
-      this.proxy = {
-        get id() {
-          return player.data.user.id
-        },
-        get name() {
-          return player.data.user.name
-        },
-        get position() {
-          return position.copy(player.base.position)
-        },
-        get rotation() {
-          return rotation.copy(player.base.rotation)
-        },
-        get quaternion() {
-          return quaternion.copy(player.base.quaternion)
-        },
-      }
-    }
-    return this.proxy
-  }
-
   destroy(local) {
     this.player?.destroy()
     this.player = null

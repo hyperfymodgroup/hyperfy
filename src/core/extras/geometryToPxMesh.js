@@ -11,7 +11,7 @@ export function geometryToPxMesh(world, geometry, convex) {
     const z = positionAttribute.getZ(i)
     const p = new PHYSX.PxVec3(x, y, z)
     points.push_back(p)
-    PHYSX.destroy(p)
+    PHYSX.destroy(p) // TODO: re-use for perf?
   }
 
   // add indices to the triangles vector, if available
@@ -37,7 +37,7 @@ export function geometryToPxMesh(world, geometry, convex) {
     desc.points.count = points.size()
     desc.points.stride = 12 // size of PhysX.PxVec3 in bytes
     desc.points.data = points.data()
-    desc.flags.raise(PHYSX.PxConvexFlagEnum.eCOMPUTE_CONVEX)
+    desc.flags.raise(PHYSX.PxConvexFlagEnum.eCOMPUTE_CONVEX) // eCHECK_ZERO_AREA_TRIANGLES
     // console.log('isValid', desc.isValid())
     pmesh = PHYSX.CreateConvexMesh(cookingParams, desc)
   } else {

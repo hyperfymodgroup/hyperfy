@@ -36,11 +36,4 @@ export function simpleCamLerp(world, camera, target, delta) {
     camera.zoom += (distance - camera.zoom) * alpha // regular lerp
     // camera.position.lerp(v1.set(0, 0, distance), 6 * delta)
   }
-
-  // console.log('Cam target', cameraRig.position.toArray())
-  // force snap
-  // cameraRig.position.copy(this.target.position)
-  // cameraRig.quaternion.copy(this.target.quaternion)
-  // camera.position.z = distance
-  // console.log('Cam snap to target', cameraRig.position.toArray())
 }

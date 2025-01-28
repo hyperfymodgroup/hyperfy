@@ -45,12 +45,8 @@ export class Socket {
 
   onMessage = packet => {
     const [method, data] = readPacket(packet)
+    this.network.enqueue(this, method, data)
     // console.log('<-', method, data)
-    try {
-      this.network[method]?.(this, data)
-    } catch (err) {
-      console.error(err)
-    }
   }
 
   onClose = e => {

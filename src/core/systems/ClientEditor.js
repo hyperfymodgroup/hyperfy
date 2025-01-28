@@ -170,6 +170,7 @@ export class ClientEditor extends System {
             model: entity.blueprint.model,
             script: entity.blueprint.script,
             config: cloneDeep(entity.blueprint.config),
+            preload: entity.blueprint.preload,
           }
           this.world.blueprints.add(blueprint, true)
           entity.modify({ blueprint: blueprint.id })
@@ -264,6 +265,7 @@ export class ClientEditor extends System {
       model: url,
       script: null,
       config: {},
+      preload: false,
     }
     this.world.blueprints.add(blueprint, true)
     const hit = this.world.stage.raycastPointer(this.control.pointer.position)[0]
@@ -300,6 +302,7 @@ export class ClientEditor extends System {
           model: url,
           script: null,
           config: {},
+          preload: false,
         }
         this.world.blueprints.add(blueprint, true)
         const hit = this.world.stage.raycastPointer(this.control.pointer.position)[0]

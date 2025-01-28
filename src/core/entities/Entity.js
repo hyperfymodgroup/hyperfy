@@ -14,7 +14,7 @@ export class Entity {
     // or applying local changes
   }
 
-  onEvent(name, data, clientId) {
+  onEvent(version, name, data, networkId) {
     // ...
   }
 
@@ -23,12 +23,6 @@ export class Entity {
   }
 
   destroy(local) {
-    if (this.dead) return
-    this.dead = true
-    this.world.entities.remove(this.data.id)
-    // if removed locally we need to broadcast to server/clients
-    if (local) {
-      this.world.network.send('entityRemoved', this.data.id)
-    }
+    // ...
   }
 }

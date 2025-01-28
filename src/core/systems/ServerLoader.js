@@ -61,7 +61,7 @@ export class ServerLoader extends System {
       //   return texture
       // })
     }
-    if (type === 'tex') {
+    if (type === 'texture') {
       // ...
     }
     if (type === 'model') {

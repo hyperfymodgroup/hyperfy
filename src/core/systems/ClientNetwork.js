@@ -16,6 +16,7 @@ export class ClientNetwork extends System {
     this.apiUrl = null
     this.id = null
     this.isClient = true
+    this.queue = []
   }
 
   init({ wsUrl, apiUrl }) {
@@ -25,6 +26,10 @@ export class ClientNetwork extends System {
     this.ws.binaryType = 'arraybuffer'
     this.ws.addEventListener('message', this.onPacket)
     this.ws.addEventListener('close', this.onClose)
+  }
+
+  preFixedUpdate() {
+    this.flush()
   }
 
   send(name, data) {
@@ -43,10 +48,25 @@ export class ClientNetwork extends System {
     })
   }
 
+  enqueue(method, data) {
+    this.queue.push([method, data])
+  }
+
+  flush() {
+    while (this.queue.length) {
+      try {
+        const [method, data] = this.queue.shift()
+        this[method]?.(data)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+  }
+
   onPacket = e => {
     const [method, data] = readPacket(e.data)
+    this.enqueue(method, data)
     // console.log('<-', method, data)
-    this[method]?.(data)
   }
 
   onSnapshot(data) {
@@ -86,6 +106,10 @@ export class ClientNetwork extends System {
 
   onEntityRemoved = id => {
     this.world.entities.remove(id)
+  }
+
+  onPlayerTeleport = data => {
+    this.world.entities.player?.teleport(data)
   }
 
   onClose = code => {

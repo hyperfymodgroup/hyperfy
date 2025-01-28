@@ -47,7 +47,18 @@ export class ClientLoader extends System {
     return this.results.get(key)
   }
 
-  load(type, url) {
+  preload(items) {
+    // console.log('preload', items)
+    const promises = items.map(item => this.load(item.type, item.url))
+    this.preloader = Promise.allSettled(promises).then(() => {
+      this.preloader = null
+    })
+  }
+
+  async load(type, url) {
+    if (this.preloader) {
+      await this.preloader
+    }
     const key = `${type}/${url}`
     if (this.promises.has(key)) {
       return this.promises.get(key)
@@ -60,7 +71,7 @@ export class ClientLoader extends System {
         return texture
       })
     }
-    if (type === 'tex') {
+    if (type === 'texture') {
       promise = this.texLoader.loadAsync(url).then(texture => {
         this.results.set(key, texture)
         return texture
@@ -130,6 +141,18 @@ export class ClientLoader extends System {
     const key = `${type}/${url}`
     const localUrl = URL.createObjectURL(file)
     let promise
+    if (type === 'hdr') {
+      promise = this.rgbeLoader.loadAsync(localUrl).then(texture => {
+        this.results.set(key, texture)
+        return texture
+      })
+    }
+    if (type === 'texture') {
+      promise = this.texLoader.loadAsync(localUrl).then(texture => {
+        this.results.set(key, texture)
+        return texture
+      })
+    }
     if (type === 'model') {
       promise = this.gltfLoader.loadAsync(localUrl).then(glb => {
         const node = glbToNodes(glb, this.world)

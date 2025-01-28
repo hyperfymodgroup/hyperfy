@@ -95,6 +95,7 @@ export class Stage extends System {
       geometry,
       material,
       getEntity: () => node.ctx.entity,
+      node,
     }
     this.scene.add(mesh)
     this.octree.insert(sItem)
@@ -205,6 +206,7 @@ class Model {
       geometry: this.geometry,
       material: this.material,
       getEntity: () => this.items[item.idx]?.node.ctx.entity,
+      node,
     }
     this.stage.octree.insert(sItem)
     return {

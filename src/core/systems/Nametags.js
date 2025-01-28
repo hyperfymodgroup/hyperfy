@@ -44,8 +44,13 @@ export class Nametags extends System {
     this.texture.needsUpdate = true
     this.material = new CustomShaderMaterial({
       baseMaterial: THREE.MeshBasicMaterial,
+      // all nametags are drawn on top of everything
+      // this isn't perfect but we should be improve.
+      // also note mesh.renderOrder=9999
       transparent: true,
       depthWrite: false,
+      depthTest: false,
+
       uniforms: {
         uAtlas: { value: this.texture },
         uOrientation: { value: this.world.rig.quaternion },
@@ -88,6 +93,7 @@ export class Nametags extends System {
     this.geometry = new THREE.PlaneGeometry(1, NAMETAG_HEIGHT / NAMETAG_WIDTH)
     this.geometry.setAttribute('coords', new THREE.InstancedBufferAttribute(new Float32Array(MAX_INSTANCES * 2), 2)) // xy coordinates in atlas
     this.mesh = new THREE.InstancedMesh(this.geometry, this.material, MAX_INSTANCES)
+    this.mesh.renderOrder = 9999
     this.mesh.matrixAutoUpdate = false
     this.mesh.matrixWorldAutoUpdate = false
     this.mesh.frustumCulled = false
