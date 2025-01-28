@@ -105,6 +105,11 @@ export class ClientEditor extends System {
       const roles = this.world.entities.player.data.user.roles
       const isAdmin = hasRole(roles, 'admin')
       const isBuilder = hasRole(roles, 'builder')
+
+      // Get blueprint to check if it's a VRM model
+      const blueprint = this.world.blueprints.get(entity.data.blueprint)
+      const isVrm = blueprint?.model?.toLowerCase().endsWith('.vrm')
+
       context.actions.push({
         label: 'Inspect',
         icon: EyeIcon,
@@ -115,6 +120,55 @@ export class ClientEditor extends System {
           this.world.emit('inspect', entity)
         },
       })
+
+      // Add Equip Avatar option for VRM models
+      if (isVrm) {
+        context.actions.push({
+          label: 'Equip Avatar',
+          icon: HandIcon,
+          visible: true, // Available to all users
+          disabled: false,
+          onClick: async () => {
+            this.setContext(null)
+            try {
+              // prep new user data
+              const player = this.world.entities.player
+              const prevUser = player.data.user
+              const newUser = cloneDeep(player.data.user)
+              newUser.avatar = blueprint.model
+
+              // update locally
+              player.modify({ user: newUser })
+
+              // update for everyone
+              this.world.network.send('entityModified', {
+                id: player.data.id,
+                user: newUser,
+              })
+
+              // Show feedback in chat
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Avatar equipped successfully',
+                createdAt: moment().toISOString(),
+              })
+            } catch (err) {
+              console.error('Failed to equip avatar:', err)
+              // Show error in chat
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Failed to equip avatar',
+                createdAt: moment().toISOString(),
+              })
+            }
+          },
+        })
+      }
+
       context.actions.push({
         label: 'Move',
         icon: HandIcon,
@@ -691,6 +745,43 @@ export class ClientEditor extends System {
     const roles = this.world.entities.player.data.user.roles
     const canEdit = hasRole(roles, 'admin', 'builder')
     if (!canEdit) return
+
+    // Handle delete keys
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
+      let entity
+      for (const hit of hits) {
+        entity = hit.getEntity?.()
+        if (entity && entity.isApp) break
+      }
+
+      if (entity && entity.isApp) {
+        e.preventDefault()
+        try {
+          // Remove the entity
+          entity.destroy(true)
+          
+          // Show feedback in chat
+          this.world.chat.add({
+            id: uuid(),
+            from: null,
+            fromId: null,
+            body: 'Object deleted',
+            createdAt: moment().toISOString(),
+          })
+        } catch (err) {
+          console.error('Failed to delete object:', err)
+          this.world.chat.add({
+            id: uuid(),
+            from: null,
+            fromId: null,
+            body: 'Failed to delete object',
+            createdAt: moment().toISOString(),
+          })
+        }
+        return
+      }
+    }
 
     // Handle copy/cut/paste
     if (e.ctrlKey || e.metaKey) {
