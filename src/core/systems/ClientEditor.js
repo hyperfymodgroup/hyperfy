@@ -6,7 +6,7 @@ import { System } from './System'
 import { hashFile } from '../utils-client'
 import { hasRole, uuid } from '../utils'
 import { ControlPriorities } from '../extras/ControlPriorities'
-import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon } from 'lucide-react'
+import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon, LinkIcon } from 'lucide-react'
 import { cloneDeep } from 'lodash-es'
 import moment from 'moment'
 
@@ -101,6 +101,26 @@ export class ClientEditor extends System {
       const roles = this.world.entities.player.data.user.roles
       const isAdmin = hasRole(roles, 'admin')
       const isBuilder = hasRole(roles, 'builder')
+      
+      // Add Copy GLB URL action
+      const blueprint = this.world.blueprints.get(entity.data.blueprint)
+      if (blueprint?.model) {
+        context.actions.push({
+          label: 'Copy GLB URL',
+          icon: LinkIcon,
+          visible: true,
+          disabled: false,
+          onClick: () => {
+            this.setContext(null)
+            // Convert asset:// URL to full domain URL
+            const url = blueprint.model.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`)
+            navigator.clipboard.writeText(url)
+              .then(() => console.log('GLB URL copied to clipboard'))
+              .catch(err => console.error('Failed to copy GLB URL:', err))
+          },
+        })
+      }
+
       context.actions.push({
         label: 'Inspect',
         icon: EyeIcon,
