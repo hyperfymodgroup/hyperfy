@@ -120,10 +120,10 @@ export class ClientEditor extends System {
           },
         })
 
-        // Add Download JSON action
+        // Add Copy JSON action
         context.actions.push({
-          label: 'Download JSON',
-          icon: DownloadIcon,
+          label: 'Copy JSON',
+          icon: CopyIcon,
           visible: true,
           disabled: false,
           onClick: () => {
@@ -143,16 +143,18 @@ export class ClientEditor extends System {
               state: entity.data.state || {}
             }
 
-            // Create and download JSON file
-            const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `hyperfy-object-${blueprint.id.slice(0, 8)}.json`
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
+            // Copy JSON to clipboard
+            navigator.clipboard.writeText(JSON.stringify(appData, null, 2))
+              .then(() => {
+                this.world.chat.add({
+                  id: uuid(),
+                  from: null,
+                  fromId: null,
+                  body: 'Object JSON copied to clipboard',
+                  createdAt: moment().toISOString(),
+                })
+              })
+              .catch(err => console.error('Failed to copy JSON:', err))
           },
         })
       }
@@ -263,15 +265,24 @@ export class ClientEditor extends System {
     if (!canPaste) return
 
     const text = e.clipboardData.getData('text')
-    if (text) {
-        try {
-            // Check if it's a valid URL
-            new URL(text)
-            await this.handleUrl(text.trim())
-        } catch (err) {
-            // Not a valid URL, ignore
-            console.log('Not a valid URL:', text)
-        }
+    if (!text) return
+
+    try {
+      // Try to parse as JSON first
+      const data = JSON.parse(text)
+      if (data.type === 'app' && data.blueprint) {
+        await this.addJsonObject({ text: () => Promise.resolve(text) })
+        return
+      }
+    } catch (err) {
+      // Not valid JSON, try as URL
+      try {
+        new URL(text)
+        await this.handleUrl(text.trim())
+      } catch (err) {
+        // Not a valid URL either, ignore
+        console.log('Pasted content is neither valid JSON nor URL:', text)
+      }
     }
   }
 
