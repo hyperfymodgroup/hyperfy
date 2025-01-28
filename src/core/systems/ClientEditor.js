@@ -357,19 +357,25 @@ export class ClientEditor extends System {
           newData.mover = this.world.network.id
           newData.uploader = this.world.network.id // Set uploader to indicate loading state
 
-          // If we have blueprint data with URLs, create/update the blueprint
-          if (newData.blueprint && typeof newData.blueprint === 'object') {
-            const blueprintData = newData.blueprint
-            const blueprint = {
-              id: uuid(), // Generate new blueprint ID
-              version: 0,
-              model: this.fullUrlToAsset(blueprintData.model),
-              script: this.fullUrlToAsset(blueprintData.script),
-              config: blueprintData.config || {},
-              preload: blueprintData.preload || false
-            }
+          try {
+            // If we have blueprint data with URLs, create/update the blueprint
+            if (newData.blueprint && typeof newData.blueprint === 'object') {
+              const blueprintData = newData.blueprint
+              const blueprint = {
+                id: uuid(), // Generate new blueprint ID
+                version: 0,
+                model: blueprintData.model ? this.fullUrlToAsset(blueprintData.model) : null,
+                script: blueprintData.script ? this.fullUrlToAsset(blueprintData.script) : null,
+                config: blueprintData.config || {},
+                preload: blueprintData.preload || false
+              }
 
-            try {
+              // Register the blueprint first
+              this.world.blueprints.add(blueprint, true)
+
+              // Update the entity data to use the new blueprint ID
+              newData.blueprint = blueprint.id
+
               // Create a temporary app that shows loading state
               const app = this.world.entities.add(newData, true)
 
@@ -400,12 +406,6 @@ export class ClientEditor extends System {
                 // Upload to the new world
                 await this.world.network.upload(scriptFile)
               }
-
-              // Register the blueprint
-              this.world.blueprints.add(blueprint, true)
-              
-              // Update the entity to use the new blueprint
-              newData.blueprint = blueprint.id
               
               // Mark as uploaded so other clients can load it
               app.onUploaded()
@@ -418,31 +418,38 @@ export class ClientEditor extends System {
                 body: 'Object pasted and assets uploaded successfully',
                 createdAt: moment().toISOString(),
               })
-            } catch (err) {
-              console.error('Failed to transfer assets:', err)
+            } else if (typeof newData.blueprint === 'string') {
+              // We have a blueprint ID, verify it exists
+              const existingBlueprint = this.world.blueprints.get(newData.blueprint)
+              if (!existingBlueprint) {
+                throw new Error('Blueprint not found')
+              }
+              
+              // Create entity with existing blueprint
+              this.world.entities.add(newData, true)
+              
+              // Show feedback in chat
               this.world.chat.add({
                 id: uuid(),
                 from: null,
                 fromId: null,
-                body: `Failed to transfer assets: ${err.message}`,
+                body: 'Object pasted from clipboard',
                 createdAt: moment().toISOString(),
               })
-              return
+            } else {
+              throw new Error('Invalid blueprint data')
             }
+          } catch (err) {
+            console.error('Failed to paste object:', err)
+            this.world.chat.add({
+              id: uuid(),
+              from: null,
+              fromId: null,
+              body: `Failed to paste object: ${err.message}`,
+              createdAt: moment().toISOString(),
+            })
+            return
           }
-
-          // Add the new entity
-          this.world.entities.add(newData, true)
-
-          // Show feedback in chat
-          this.world.chat.add({
-            id: uuid(),
-            from: null,
-            fromId: null,
-            body: 'Object pasted from clipboard',
-            createdAt: moment().toISOString(),
-          })
-          return
         }
       } catch (err) {
         // Not valid JSON or not a Hyperfy entity, try URL handling
@@ -858,10 +865,10 @@ export class ClientEditor extends System {
                   ...entity.data,
                   blueprint: {
                     id: blueprint.id,
-                    model: this.assetToFullUrl(blueprint.model),
-                    script: this.assetToFullUrl(blueprint.script),
-                    config: blueprint.config,
-                    preload: blueprint.preload
+                    model: blueprint.model ? this.assetToFullUrl(blueprint.model) : null,
+                    script: blueprint.script ? this.assetToFullUrl(blueprint.script) : null,
+                    config: blueprint.config || {},
+                    preload: blueprint.preload || false
                   }
                 }
               }
@@ -906,10 +913,10 @@ export class ClientEditor extends System {
                   ...entity.data,
                   blueprint: {
                     id: blueprint.id,
-                    model: this.assetToFullUrl(blueprint.model),
-                    script: this.assetToFullUrl(blueprint.script),
-                    config: blueprint.config,
-                    preload: blueprint.preload
+                    model: blueprint.model ? this.assetToFullUrl(blueprint.model) : null,
+                    script: blueprint.script ? this.assetToFullUrl(blueprint.script) : null,
+                    config: blueprint.config || {},
+                    preload: blueprint.preload || false
                   }
                 }
               }
@@ -964,19 +971,25 @@ export class ClientEditor extends System {
               newData.mover = this.world.network.id
               newData.uploader = this.world.network.id // Set uploader to indicate loading state
 
-              // If we have blueprint data with URLs, create/update the blueprint
-              if (newData.blueprint && typeof newData.blueprint === 'object') {
-                const blueprintData = newData.blueprint
-                const blueprint = {
-                  id: uuid(), // Generate new blueprint ID
-                  version: 0,
-                  model: this.fullUrlToAsset(blueprintData.model),
-                  script: this.fullUrlToAsset(blueprintData.script),
-                  config: blueprintData.config || {},
-                  preload: blueprintData.preload || false
-                }
+              try {
+                // If we have blueprint data with URLs, create/update the blueprint
+                if (newData.blueprint && typeof newData.blueprint === 'object') {
+                  const blueprintData = newData.blueprint
+                  const blueprint = {
+                    id: uuid(), // Generate new blueprint ID
+                    version: 0,
+                    model: blueprintData.model ? this.fullUrlToAsset(blueprintData.model) : null,
+                    script: blueprintData.script ? this.fullUrlToAsset(blueprintData.script) : null,
+                    config: blueprintData.config || {},
+                    preload: blueprintData.preload || false
+                  }
 
-                try {
+                  // Register the blueprint first
+                  this.world.blueprints.add(blueprint, true)
+
+                  // Update the entity data to use the new blueprint ID
+                  newData.blueprint = blueprint.id
+
                   // Create a temporary app that shows loading state
                   const app = this.world.entities.add(newData, true)
 
@@ -1007,12 +1020,6 @@ export class ClientEditor extends System {
                     // Upload to the new world
                     await this.world.network.upload(scriptFile)
                   }
-
-                  // Register the blueprint
-                  this.world.blueprints.add(blueprint, true)
-                  
-                  // Update the entity to use the new blueprint
-                  newData.blueprint = blueprint.id
                   
                   // Mark as uploaded so other clients can load it
                   app.onUploaded()
@@ -1025,17 +1032,37 @@ export class ClientEditor extends System {
                     body: 'Object pasted and assets uploaded successfully',
                     createdAt: moment().toISOString(),
                   })
-                } catch (err) {
-                  console.error('Failed to transfer assets:', err)
+                } else if (typeof newData.blueprint === 'string') {
+                  // We have a blueprint ID, verify it exists
+                  const existingBlueprint = this.world.blueprints.get(newData.blueprint)
+                  if (!existingBlueprint) {
+                    throw new Error('Blueprint not found')
+                  }
+                  
+                  // Create entity with existing blueprint
+                  this.world.entities.add(newData, true)
+                  
+                  // Show feedback in chat
                   this.world.chat.add({
                     id: uuid(),
                     from: null,
                     fromId: null,
-                    body: `Failed to transfer assets: ${err.message}`,
+                    body: 'Object pasted from clipboard',
                     createdAt: moment().toISOString(),
                   })
-                  return
+                } else {
+                  throw new Error('Invalid blueprint data')
                 }
+              } catch (err) {
+                console.error('Failed to paste object:', err)
+                this.world.chat.add({
+                  id: uuid(),
+                  from: null,
+                  fromId: null,
+                  body: `Failed to paste object: ${err.message}`,
+                  createdAt: moment().toISOString(),
+                })
+                return
               }
             }
           } catch (err) {
