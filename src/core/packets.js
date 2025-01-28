@@ -16,7 +16,7 @@ const names = [
   'fileError',
   'fileDownloadStart',
   'fileDownloadChunk',
-  'fileDownloadComplete'
+  'fileDownloadComplete',
   'playerTeleport',
 ]
 
