@@ -6,7 +6,7 @@ import { System } from './System'
 import { hashFile } from '../utils-client'
 import { hasRole, uuid } from '../utils'
 import { ControlPriorities } from '../extras/ControlPriorities'
-import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon, LinkIcon } from 'lucide-react'
+import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon, LinkIcon, DownloadIcon } from 'lucide-react'
 import { cloneDeep } from 'lodash-es'
 import moment from 'moment'
 
@@ -117,6 +117,42 @@ export class ClientEditor extends System {
             navigator.clipboard.writeText(url)
               .then(() => console.log('GLB URL copied to clipboard'))
               .catch(err => console.error('Failed to copy GLB URL:', err))
+          },
+        })
+
+        // Add Download JSON action
+        context.actions.push({
+          label: 'Download JSON',
+          icon: DownloadIcon,
+          visible: true,
+          disabled: false,
+          onClick: () => {
+            this.setContext(null)
+            // Create JSON object with app data
+            const appData = {
+              type: 'app',
+              blueprint: {
+                id: blueprint.id,
+                model: blueprint.model.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`),
+                script: blueprint.script ? blueprint.script.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`) : null,
+                config: blueprint.config,
+                preload: blueprint.preload
+              },
+              quaternion: entity.data.quaternion,
+              scale: entity.data.scale || [1, 1, 1],
+              state: entity.data.state || {}
+            }
+
+            // Create and download JSON file
+            const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `hyperfy-object-${blueprint.id.slice(0, 8)}.json`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
           },
         })
       }
@@ -340,6 +376,9 @@ export class ClientEditor extends System {
     }
     if (ext === 'hype') {
         await this.addHypeFile(file)
+    }
+    if (ext === 'json') {
+        await this.addJsonObject(file)
     }
   }
 
@@ -595,6 +634,69 @@ export class ClientEditor extends System {
             createdAt: moment().toISOString(),
         })
         console.error('Hype file processing error:', err)
+    }
+  }
+
+  async addJsonObject(file) {
+    try {
+      // Read the JSON file
+      const text = await file.text()
+      const data = JSON.parse(text)
+
+      // Validate the JSON structure
+      if (!data.type || data.type !== 'app' || !data.blueprint || !data.blueprint.model) {
+        throw new Error('Invalid JSON format')
+      }
+
+      // Convert domain URLs back to asset:// format
+      const modelUrl = data.blueprint.model.replace(/^https?:\/\/[^\/]+\/assets\//, 'asset://')
+      const scriptUrl = data.blueprint.script ? data.blueprint.script.replace(/^https?:\/\/[^\/]+\/assets\//, 'asset://') : null
+
+      // Create blueprint
+      const blueprint = {
+        id: uuid(),
+        version: 0,
+        model: modelUrl,
+        script: scriptUrl,
+        config: data.blueprint.config || {},
+        preload: data.blueprint.preload || false,
+      }
+
+      // Register blueprint
+      this.world.blueprints.add(blueprint, true)
+
+      // Get spawn point
+      const hit = this.world.stage.raycastPointer(this.world.controls.pointer.position)[0]
+      const position = hit ? hit.point.toArray() : [0, 0, 0]
+
+      // Create entity data
+      const entityData = {
+        id: uuid(),
+        type: 'app',
+        blueprint: blueprint.id,
+        position,
+        quaternion: data.quaternion || [0, 0, 0, 1],
+        scale: data.scale || [1, 1, 1],
+        mover: this.world.network.id,
+        uploader: this.world.network.id,
+        state: data.state || {},
+      }
+
+      // Add entity
+      const app = this.world.entities.add(entityData, true)
+
+      // Mark as uploaded since we're using existing assets
+      app.onUploaded()
+
+    } catch (err) {
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `Failed to process JSON file: ${err.message}`,
+        createdAt: moment().toISOString(),
+      })
+      console.error('JSON file processing error:', err)
     }
   }
 
