@@ -329,6 +329,13 @@ export class ClientEditor extends System {
   }
 
   onPaste = async (e) => {
+    // Don't handle object pasting if we're focused on an input element
+    if (document.activeElement.tagName === 'INPUT' || 
+        document.activeElement.tagName === 'TEXTAREA' || 
+        document.activeElement.contentEditable === 'true') {
+      return
+    }
+
     // ensure we have admin/builder role
     const roles = this.world.entities.player.data.user.roles
     const canPaste = hasRole(roles, 'admin', 'builder')
@@ -424,9 +431,24 @@ export class ClientEditor extends System {
               if (!existingBlueprint) {
                 throw new Error('Blueprint not found')
               }
-              
+
+              // Ensure the blueprint has all required properties
+              if (!existingBlueprint.model) {
+                throw new Error('Invalid blueprint: missing model')
+              }
+
+              // Ensure all required blueprint properties are initialized
+              existingBlueprint.script = existingBlueprint.script || null
+              existingBlueprint.config = existingBlueprint.config || {}
+              existingBlueprint.preload = existingBlueprint.preload || false
+              existingBlueprint.version = existingBlueprint.version || 0
+
+              // Register the updated blueprint
+              this.world.blueprints.add(existingBlueprint, true)
+
               // Create entity with existing blueprint
-              this.world.entities.add(newData, true)
+              const app = this.world.entities.add(newData, true)
+              app.onUploaded() // Mark as ready since we're using an existing blueprint
               
               // Show feedback in chat
               this.world.chat.add({
@@ -834,6 +856,13 @@ export class ClientEditor extends System {
   }
 
   onKeyDown = async (e) => {
+    // Don't handle shortcuts if we're focused on an input element
+    if (document.activeElement.tagName === 'INPUT' || 
+        document.activeElement.tagName === 'TEXTAREA' || 
+        document.activeElement.contentEditable === 'true') {
+      return
+    }
+
     // Check if we have admin/builder role
     const roles = this.world.entities.player.data.user.roles
     const canEdit = hasRole(roles, 'admin', 'builder')
@@ -1038,9 +1067,24 @@ export class ClientEditor extends System {
                   if (!existingBlueprint) {
                     throw new Error('Blueprint not found')
                   }
-                  
+
+                  // Ensure the blueprint has all required properties
+                  if (!existingBlueprint.model) {
+                    throw new Error('Invalid blueprint: missing model')
+                  }
+
+                  // Ensure all required blueprint properties are initialized
+                  existingBlueprint.script = existingBlueprint.script || null
+                  existingBlueprint.config = existingBlueprint.config || {}
+                  existingBlueprint.preload = existingBlueprint.preload || false
+                  existingBlueprint.version = existingBlueprint.version || 0
+
+                  // Register the updated blueprint
+                  this.world.blueprints.add(existingBlueprint, true)
+
                   // Create entity with existing blueprint
-                  this.world.entities.add(newData, true)
+                  const app = this.world.entities.add(newData, true)
+                  app.onUploaded() // Mark as ready since we're using an existing blueprint
                   
                   // Show feedback in chat
                   this.world.chat.add({
