@@ -31,10 +31,20 @@ export class ClientEditor extends System {
       downAt: null,
       movement: new THREE.Vector3(),
     }
-    // Add paste event listener
+    // Track moving objects
+    this.movingObject = null
+    this.originalPosition = null
+    this.lastCopiedObject = null // Store last copied object for quick duplication
+
+    // Add action history for undo
+    this.actionHistory = []
+    this.maxHistoryLength = 50 // Keep last 50 actions
+
+    // Add event listeners
     window.addEventListener('paste', this.onPaste)
-    // Add copy event listener
     window.addEventListener('copy', this.onCopy)
+    window.addEventListener('cut', this.onCut)
+    window.addEventListener('keydown', this.onKeyDown)
   }
 
   async init({ viewport }) {
@@ -49,6 +59,30 @@ export class ClientEditor extends System {
       priority: ControlPriorities.EDITOR,
       onPress: code => {
         if (code === 'MouseRight') {
+          // Check if we're currently moving an object
+          if (this.movingObject) {
+            // Restore original position
+            if (this.originalPosition) {
+              this.movingObject.data.position = [...this.originalPosition]
+              this.movingObject.data.mover = null
+              this.world.network.send('entityModified', {
+                id: this.movingObject.data.id,
+                position: this.movingObject.data.position,
+                mover: null
+              })
+            }
+            this.movingObject = null
+            this.originalPosition = null
+            
+            // Start context menu after a brief delay
+            setTimeout(() => {
+              this.contextTracker.downAt = performance.now()
+              this.contextTracker.movement.set(0, 0, 0)
+            }, 50)
+            
+            return true // Consume the event
+          }
+          
           this.contextTracker.downAt = performance.now()
           this.contextTracker.movement.set(0, 0, 0)
         }
@@ -178,6 +212,9 @@ export class ClientEditor extends System {
         disabled: false,
         onClick: () => {
           this.setContext(null)
+          // Store original position before moving
+          this.movingObject = entity
+          this.originalPosition = [...entity.data.position]
           entity.move()
         },
       })
@@ -334,6 +371,75 @@ export class ClientEditor extends System {
       from: null,
       fromId: null,
       body: 'Object JSON copied to clipboard',
+      createdAt: moment().toISOString(),
+    })
+  }
+
+  onCut = async (e) => {
+    // ensure we have admin/builder role
+    const roles = this.world.entities.player.data.user.roles
+    const canCut = hasRole(roles, 'admin', 'builder')
+    if (!canCut) return
+
+    // Get object under cursor
+    const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
+    let entity
+    for (const hit of hits) {
+      entity = hit.getEntity?.()
+      if (entity) break
+    }
+    
+    if (!entity?.isApp) return
+
+    // Store entity data before deletion for potential undo
+    const entityData = {
+      type: entity.data.type,
+      blueprint: entity.data.blueprint,
+      position: entity.data.position,
+      quaternion: entity.data.quaternion,
+      scale: entity.data.scale || [1, 1, 1],
+      state: entity.data.state || {}
+    }
+
+    // Get blueprint data
+    const blueprint = this.world.blueprints.get(entity.data.blueprint)
+    if (!blueprint?.model) return
+
+    e.preventDefault() // Prevent default cut behavior
+
+    // Create JSON object with app data
+    const appData = {
+      type: 'app',
+      blueprint: {
+        id: blueprint.id,
+        model: blueprint.model.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`),
+        script: blueprint.script ? blueprint.script.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`) : null,
+        config: blueprint.config,
+        preload: blueprint.preload
+      },
+      quaternion: entity.data.quaternion,
+      scale: entity.data.scale || [1, 1, 1],
+      state: entity.data.state || {}
+    }
+
+    // Copy to clipboard
+    e.clipboardData.setData('text/plain', JSON.stringify(appData, null, 2))
+
+    // Delete the entity
+    entity.destroy(true)
+
+    // Add to history
+    this.addToHistory({
+      type: 'delete',
+      entityData
+    })
+
+    // Show confirmation message
+    this.world.chat.add({
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: 'Object cut to clipboard',
       createdAt: moment().toISOString(),
     })
   }
@@ -777,6 +883,12 @@ export class ClientEditor extends System {
       // Add entity
       const app = this.world.entities.add(entityData, true)
 
+      // Add to history
+      this.addToHistory({
+        type: 'create',
+        entityId: app.data.id
+      })
+
       // Mark as uploaded since we're using existing assets
       app.onUploaded()
 
@@ -792,9 +904,316 @@ export class ClientEditor extends System {
     }
   }
 
+  // Add action to history with its inverse operation
+  addToHistory(action) {
+    this.actionHistory.push(action)
+    if (this.actionHistory.length > this.maxHistoryLength) {
+      this.actionHistory.shift()
+    }
+  }
+
+  onKeyDown = (e) => {
+    // ensure we have admin/builder role
+    const roles = this.world.entities.player.data.user.roles
+    const canEdit = hasRole(roles, 'admin', 'builder')
+    if (!canEdit) return
+
+    // Get object under cursor for operations that need it
+    const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
+    let entity
+    for (const hit of hits) {
+      entity = hit.getEntity?.()
+      if (entity?.isApp) break
+    }
+
+    // Modern building game controls
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+Z - Undo
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        this.undo()
+      }
+      // Ctrl+Shift+Z or Ctrl+Y - Redo (placeholder for future implementation)
+      else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+        e.preventDefault()
+        // TODO: Implement redo functionality
+      }
+      // Ctrl+C - Copy
+      else if (e.key === 'c') {
+        e.preventDefault()
+        if (entity) {
+          this.lastCopiedObject = entity
+          // Get blueprint data
+          const blueprint = this.world.blueprints.get(entity.data.blueprint)
+          if (!blueprint?.model) return
+
+          // Create JSON object with app data
+          const appData = {
+            type: 'app',
+            blueprint: {
+              id: blueprint.id,
+              model: blueprint.model.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`),
+              script: blueprint.script ? blueprint.script.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`) : null,
+              config: blueprint.config,
+              preload: blueprint.preload
+            },
+            quaternion: entity.data.quaternion,
+            scale: entity.data.scale || [1, 1, 1],
+            state: entity.data.state || {}
+          }
+
+          // Copy to clipboard
+          navigator.clipboard.writeText(JSON.stringify(appData, null, 2))
+            .then(() => {
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Object JSON copied to clipboard',
+                createdAt: moment().toISOString(),
+              })
+            })
+            .catch(err => console.error('Failed to copy JSON:', err))
+        }
+      }
+      // Ctrl+X - Cut
+      else if (e.key === 'x') {
+        e.preventDefault()
+        if (entity) {
+          this.lastCopiedObject = entity
+          // Get blueprint data
+          const blueprint = this.world.blueprints.get(entity.data.blueprint)
+          if (!blueprint?.model) return
+
+          // Store entity data for undo
+          const entityData = {
+            type: entity.data.type,
+            blueprint: entity.data.blueprint,
+            position: entity.data.position,
+            quaternion: entity.data.quaternion,
+            scale: entity.data.scale || [1, 1, 1],
+            state: entity.data.state || {}
+          }
+
+          // Create JSON object with app data
+          const appData = {
+            type: 'app',
+            blueprint: {
+              id: blueprint.id,
+              model: blueprint.model.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`),
+              script: blueprint.script ? blueprint.script.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`) : null,
+              config: blueprint.config,
+              preload: blueprint.preload
+            },
+            quaternion: entity.data.quaternion,
+            scale: entity.data.scale || [1, 1, 1],
+            state: entity.data.state || {}
+          }
+
+          // Copy to clipboard
+          navigator.clipboard.writeText(JSON.stringify(appData, null, 2))
+            .then(() => {
+              // Delete the entity after successful copy
+              entity.destroy(true)
+              this.addToHistory({
+                type: 'delete',
+                entityData
+              })
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Object cut to clipboard',
+                createdAt: moment().toISOString(),
+              })
+            })
+            .catch(err => console.error('Failed to cut object:', err))
+        }
+      }
+      // Ctrl+V - Paste
+      else if (e.key === 'v') {
+        e.preventDefault()
+        navigator.clipboard.readText()
+          .then(async text => {
+            if (!text) return
+            try {
+              // Try to parse as JSON first
+              const data = JSON.parse(text)
+              if (data.type === 'app' && data.blueprint) {
+                await this.addJsonObject({ text: () => Promise.resolve(text) })
+              }
+            } catch (err) {
+              // Not valid JSON, try as URL
+              try {
+                new URL(text)
+                await this.handleUrl(text.trim())
+              } catch (err) {
+                // Not a valid URL either, ignore
+                console.log('Pasted content is neither valid JSON nor URL:', text)
+              }
+            }
+          })
+          .catch(err => console.error('Failed to read clipboard:', err))
+      }
+      // Ctrl+D - Quick Duplicate (like Blender)
+      else if (e.key === 'd') {
+        e.preventDefault()
+        if (entity) {
+          this.duplicateObject(entity)
+        }
+      }
+    } else {
+      // R - Rotate object being moved (90 degrees)
+      if (e.key === 'r' && this.movingObject) {
+        e.preventDefault()
+        const currentRotation = new THREE.Euler().setFromQuaternion(
+          new THREE.Quaternion().fromArray(this.movingObject.data.quaternion)
+        )
+        currentRotation.y += Math.PI / 2 // 90 degrees
+        const newQuaternion = new THREE.Quaternion().setFromEuler(currentRotation)
+        this.movingObject.data.quaternion = newQuaternion.toArray()
+        this.world.network.send('entityModified', {
+          id: this.movingObject.data.id,
+          quaternion: this.movingObject.data.quaternion
+        })
+      }
+      // Delete/Backspace - Delete object
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && entity) {
+        e.preventDefault()
+        const entityData = {
+          type: entity.data.type,
+          blueprint: entity.data.blueprint,
+          position: entity.data.position,
+          quaternion: entity.data.quaternion,
+          scale: entity.data.scale || [1, 1, 1],
+          state: entity.data.state || {}
+        }
+        entity.destroy(true)
+        this.addToHistory({
+          type: 'delete',
+          entityData
+        })
+      }
+      // Escape - Cancel current operation
+      else if (e.key === 'Escape') {
+        e.preventDefault()
+        if (this.movingObject) {
+          // Cancel move and restore position
+          if (this.originalPosition) {
+            this.movingObject.data.position = [...this.originalPosition]
+            this.movingObject.data.mover = null
+            this.world.network.send('entityModified', {
+              id: this.movingObject.data.id,
+              position: this.movingObject.data.position,
+              mover: null
+            })
+          }
+          this.movingObject = null
+          this.originalPosition = null
+        }
+        this.setContext(null)
+      }
+    }
+  }
+
+  duplicateObject(entity) {
+    if (!entity?.isApp) return
+
+    const data = {
+      id: uuid(),
+      type: 'app',
+      blueprint: entity.data.blueprint,
+      position: entity.data.position,
+      quaternion: entity.data.quaternion,
+      scale: entity.data.scale || [1, 1, 1],
+      mover: this.world.network.id,
+      uploader: null,
+      state: cloneDeep(entity.data.state) || {},
+    }
+
+    // Offset the duplicate slightly so it's not exactly on top
+    const offset = 0.5 // 0.5 units
+    data.position = [
+      data.position[0] + offset,
+      data.position[1],
+      data.position[2] + offset
+    ]
+
+    const app = this.world.entities.add(data, true)
+    
+    // Add to history
+    this.addToHistory({
+      type: 'create',
+      entityId: app.data.id
+    })
+
+    // Start moving the duplicated object
+    this.movingObject = app
+    this.originalPosition = [...app.data.position]
+    app.move()
+  }
+
+  undo = () => {
+    // ensure we have admin/builder role
+    const roles = this.world.entities.player.data.user.roles
+    const canUndo = hasRole(roles, 'admin', 'builder')
+    if (!canUndo) return
+
+    const lastAction = this.actionHistory.pop()
+    if (!lastAction) {
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: 'Nothing to undo',
+        createdAt: moment().toISOString(),
+      })
+      return
+    }
+
+    try {
+      // Execute the inverse operation
+      if (lastAction.type === 'delete') {
+        // Recreate the deleted entity
+        const entityData = {
+          ...lastAction.entityData,
+          id: uuid(), // Generate new ID for the restored entity
+          mover: this.world.network.id,
+          uploader: null, // No need to upload since assets exist
+        }
+        this.world.entities.add(entityData, true)
+      } else if (lastAction.type === 'create') {
+        // Delete the created entity
+        const entity = this.world.entities.get(lastAction.entityId)
+        if (entity) {
+          entity.destroy(true)
+        }
+      }
+
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: 'Undo successful',
+        createdAt: moment().toISOString(),
+      })
+    } catch (err) {
+      console.error('Undo failed:', err)
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: 'Failed to undo last action',
+        createdAt: moment().toISOString(),
+      })
+    }
+  }
+
   destroy() {
     super.destroy()
     window.removeEventListener('paste', this.onPaste)
     window.removeEventListener('copy', this.onCopy)
+    window.removeEventListener('cut', this.onCut)
+    window.removeEventListener('keydown', this.onKeyDown)
   }
 }
