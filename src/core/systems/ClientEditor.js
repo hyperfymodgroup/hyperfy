@@ -33,6 +33,8 @@ export class ClientEditor extends System {
     }
     // Add paste event listener
     window.addEventListener('paste', this.onPaste)
+    // Add copy event listener
+    window.addEventListener('copy', this.onCopy)
   }
 
   async init({ viewport }) {
@@ -284,6 +286,56 @@ export class ClientEditor extends System {
         console.log('Pasted content is neither valid JSON nor URL:', text)
       }
     }
+  }
+
+  onCopy = async (e) => {
+    // ensure we have admin/builder role
+    const roles = this.world.entities.player.data.user.roles
+    const canCopy = hasRole(roles, 'admin', 'builder')
+    if (!canCopy) return
+
+    // Get object under cursor
+    const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
+    let entity
+    for (const hit of hits) {
+      entity = hit.getEntity?.()
+      if (entity) break
+    }
+    
+    if (!entity?.isApp) return
+
+    // Get blueprint data
+    const blueprint = this.world.blueprints.get(entity.data.blueprint)
+    if (!blueprint?.model) return
+
+    e.preventDefault() // Prevent default copy behavior
+
+    // Create JSON object with app data
+    const appData = {
+      type: 'app',
+      blueprint: {
+        id: blueprint.id,
+        model: blueprint.model.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`),
+        script: blueprint.script ? blueprint.script.replace('asset://', `${window.location.protocol}//${window.location.host}/assets/`) : null,
+        config: blueprint.config,
+        preload: blueprint.preload
+      },
+      quaternion: entity.data.quaternion,
+      scale: entity.data.scale || [1, 1, 1],
+      state: entity.data.state || {}
+    }
+
+    // Copy to clipboard
+    e.clipboardData.setData('text/plain', JSON.stringify(appData, null, 2))
+
+    // Show confirmation message
+    this.world.chat.add({
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: 'Object JSON copied to clipboard',
+      createdAt: moment().toISOString(),
+    })
   }
 
   async handleUrl(url) {
@@ -743,5 +795,6 @@ export class ClientEditor extends System {
   destroy() {
     super.destroy()
     window.removeEventListener('paste', this.onPaste)
+    window.removeEventListener('copy', this.onCopy)
   }
 }
