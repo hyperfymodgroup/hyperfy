@@ -355,7 +355,7 @@ export class ClientEditor extends System {
           newData.id = uuid()
           newData.position = position
           newData.mover = this.world.network.id
-          newData.uploader = null // Reset uploader since assets are already available
+          newData.uploader = this.world.network.id // Set uploader to indicate loading state
 
           // If we have blueprint data with URLs, create/update the blueprint
           if (newData.blueprint && typeof newData.blueprint === 'object') {
@@ -369,13 +369,36 @@ export class ClientEditor extends System {
               preload: blueprintData.preload || false
             }
 
-            // Try to load the model and script
             try {
+              // Create a temporary app that shows loading state
+              const app = this.world.entities.add(newData, true)
+
+              // Download and upload the model if it exists
               if (blueprint.model) {
-                await this.world.loader.load('model', blueprint.model)
+                const modelResponse = await fetch(blueprintData.model)
+                if (!modelResponse.ok) throw new Error('Failed to fetch model')
+                const modelBlob = await modelResponse.blob()
+                const modelFile = new File([modelBlob], blueprint.model.split('/').pop(), { type: 'model/gltf-binary' })
+                
+                // Cache the model locally for instant loading
+                this.world.loader.insert('model', blueprint.model, modelFile)
+                
+                // Upload to the new world
+                await this.world.network.upload(modelFile)
               }
+
+              // Download and upload the script if it exists
               if (blueprint.script) {
-                await this.world.loader.load('script', blueprint.script)
+                const scriptResponse = await fetch(blueprintData.script)
+                if (!scriptResponse.ok) throw new Error('Failed to fetch script')
+                const scriptBlob = await scriptResponse.blob()
+                const scriptFile = new File([scriptBlob], blueprint.script.split('/').pop(), { type: 'application/javascript' })
+                
+                // Cache the script locally
+                this.world.loader.insert('script', blueprint.script, scriptFile)
+                
+                // Upload to the new world
+                await this.world.network.upload(scriptFile)
               }
 
               // Register the blueprint
@@ -383,13 +406,25 @@ export class ClientEditor extends System {
               
               // Update the entity to use the new blueprint
               newData.blueprint = blueprint.id
-            } catch (err) {
-              console.error('Failed to load model/script:', err)
+              
+              // Mark as uploaded so other clients can load it
+              app.onUploaded()
+
+              // Show success message
               this.world.chat.add({
                 id: uuid(),
                 from: null,
                 fromId: null,
-                body: `Failed to load model/script: ${err.message}`,
+                body: 'Object pasted and assets uploaded successfully',
+                createdAt: moment().toISOString(),
+              })
+            } catch (err) {
+              console.error('Failed to transfer assets:', err)
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: `Failed to transfer assets: ${err.message}`,
                 createdAt: moment().toISOString(),
               })
               return
@@ -404,7 +439,7 @@ export class ClientEditor extends System {
             id: uuid(),
             from: null,
             fromId: null,
-            body: 'Object pasted from clipboard with full URLs converted',
+            body: 'Object pasted from clipboard',
             createdAt: moment().toISOString(),
           })
           return
@@ -805,6 +840,219 @@ export class ClientEditor extends System {
       if (entity && entity.isApp) break
     }
 
+    // Handle copy/cut/paste
+    if (e.ctrlKey || e.metaKey) {
+      switch (e.key.toLowerCase()) {
+        case 'c': // Copy
+          if (entity && entity.isApp) {
+            e.preventDefault()
+            try {
+              // Get the blueprint data
+              const blueprint = this.world.blueprints.get(entity.data.blueprint)
+              if (!blueprint) throw new Error('Blueprint not found')
+
+              // Convert entity data to JSON string with full URLs
+              const clipboardData = {
+                type: 'hyperfy-entity',
+                data: {
+                  ...entity.data,
+                  blueprint: {
+                    id: blueprint.id,
+                    model: this.assetToFullUrl(blueprint.model),
+                    script: this.assetToFullUrl(blueprint.script),
+                    config: blueprint.config,
+                    preload: blueprint.preload
+                  }
+                }
+              }
+              const jsonStr = JSON.stringify(clipboardData, null, 2)
+              
+              // Copy to system clipboard
+              await navigator.clipboard.writeText(jsonStr)
+              
+              // Show feedback in chat
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Object data copied to clipboard with full URLs',
+                createdAt: moment().toISOString(),
+              })
+            } catch (err) {
+              console.error('Failed to copy to clipboard:', err)
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Failed to copy object data',
+                createdAt: moment().toISOString(),
+              })
+            }
+          }
+          break
+
+        case 'x': // Cut
+          if (entity && entity.isApp) {
+            e.preventDefault()
+            try {
+              // Get the blueprint data
+              const blueprint = this.world.blueprints.get(entity.data.blueprint)
+              if (!blueprint) throw new Error('Blueprint not found')
+
+              // Convert entity data to JSON string with full URLs
+              const clipboardData = {
+                type: 'hyperfy-entity',
+                data: {
+                  ...entity.data,
+                  blueprint: {
+                    id: blueprint.id,
+                    model: this.assetToFullUrl(blueprint.model),
+                    script: this.assetToFullUrl(blueprint.script),
+                    config: blueprint.config,
+                    preload: blueprint.preload
+                  }
+                }
+              }
+              const jsonStr = JSON.stringify(clipboardData, null, 2)
+              
+              // Copy to system clipboard
+              await navigator.clipboard.writeText(jsonStr)
+              
+              // Remove the original entity
+              entity.destroy(true)
+              
+              // Show feedback in chat
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Object data cut to clipboard with full URLs',
+                createdAt: moment().toISOString(),
+              })
+            } catch (err) {
+              console.error('Failed to cut to clipboard:', err)
+              this.world.chat.add({
+                id: uuid(),
+                from: null,
+                fromId: null,
+                body: 'Failed to cut object data',
+                createdAt: moment().toISOString(),
+              })
+            }
+          }
+          break
+
+        case 'v': // Paste
+          try {
+            e.preventDefault()
+            // Get clipboard text content
+            const text = await navigator.clipboard.readText()
+            if (!text) return
+
+            // Try to parse as JSON
+            const clipboardData = JSON.parse(text)
+            
+            // Check if it's a Hyperfy entity
+            if (clipboardData.type === 'hyperfy-entity' && clipboardData.data) {
+              const hit = this.world.stage.raycastPointer(this.world.controls.pointer.position)[0]
+              const position = hit ? hit.point.toArray() : [0, 0, 0]
+              
+              // Create new entity data with new ID and position
+              const newData = cloneDeep(clipboardData.data)
+              newData.id = uuid()
+              newData.position = position
+              newData.mover = this.world.network.id
+              newData.uploader = this.world.network.id // Set uploader to indicate loading state
+
+              // If we have blueprint data with URLs, create/update the blueprint
+              if (newData.blueprint && typeof newData.blueprint === 'object') {
+                const blueprintData = newData.blueprint
+                const blueprint = {
+                  id: uuid(), // Generate new blueprint ID
+                  version: 0,
+                  model: this.fullUrlToAsset(blueprintData.model),
+                  script: this.fullUrlToAsset(blueprintData.script),
+                  config: blueprintData.config || {},
+                  preload: blueprintData.preload || false
+                }
+
+                try {
+                  // Create a temporary app that shows loading state
+                  const app = this.world.entities.add(newData, true)
+
+                  // Download and upload the model if it exists
+                  if (blueprint.model) {
+                    const modelResponse = await fetch(blueprintData.model)
+                    if (!modelResponse.ok) throw new Error('Failed to fetch model')
+                    const modelBlob = await modelResponse.blob()
+                    const modelFile = new File([modelBlob], blueprint.model.split('/').pop(), { type: 'model/gltf-binary' })
+                    
+                    // Cache the model locally for instant loading
+                    this.world.loader.insert('model', blueprint.model, modelFile)
+                    
+                    // Upload to the new world
+                    await this.world.network.upload(modelFile)
+                  }
+
+                  // Download and upload the script if it exists
+                  if (blueprint.script) {
+                    const scriptResponse = await fetch(blueprintData.script)
+                    if (!scriptResponse.ok) throw new Error('Failed to fetch script')
+                    const scriptBlob = await scriptResponse.blob()
+                    const scriptFile = new File([scriptBlob], blueprint.script.split('/').pop(), { type: 'application/javascript' })
+                    
+                    // Cache the script locally
+                    this.world.loader.insert('script', blueprint.script, scriptFile)
+                    
+                    // Upload to the new world
+                    await this.world.network.upload(scriptFile)
+                  }
+
+                  // Register the blueprint
+                  this.world.blueprints.add(blueprint, true)
+                  
+                  // Update the entity to use the new blueprint
+                  newData.blueprint = blueprint.id
+                  
+                  // Mark as uploaded so other clients can load it
+                  app.onUploaded()
+
+                  // Show success message
+                  this.world.chat.add({
+                    id: uuid(),
+                    from: null,
+                    fromId: null,
+                    body: 'Object pasted and assets uploaded successfully',
+                    createdAt: moment().toISOString(),
+                  })
+                } catch (err) {
+                  console.error('Failed to transfer assets:', err)
+                  this.world.chat.add({
+                    id: uuid(),
+                    from: null,
+                    fromId: null,
+                    body: `Failed to transfer assets: ${err.message}`,
+                    createdAt: moment().toISOString(),
+                  })
+                  return
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to paste from clipboard:', err)
+            this.world.chat.add({
+              id: uuid(),
+              from: null,
+              fromId: null,
+              body: 'Failed to paste object data',
+              createdAt: moment().toISOString(),
+            })
+          }
+          break
+      }
+      return
+    }
+
     // Handle 'T' key for quick avatar swap
     if (e.key.toLowerCase() === 't' && entity && entity.isApp) {
       // Check if it's a VRM model
@@ -930,55 +1178,6 @@ export class ClientEditor extends System {
           })
         }
         return
-      }
-    }
-
-    // Handle copy/cut/paste
-    if (e.ctrlKey || e.metaKey) {
-      if (entity && entity.isApp) {
-        e.preventDefault()
-        try {
-          // Get the blueprint data
-          const blueprint = this.world.blueprints.get(entity.data.blueprint)
-          if (!blueprint) throw new Error('Blueprint not found')
-
-          // Convert entity data to JSON string with full URLs
-          const clipboardData = {
-            type: 'hyperfy-entity',
-            data: {
-              ...entity.data,
-              blueprint: {
-                id: blueprint.id,
-                model: this.assetToFullUrl(blueprint.model),
-                script: this.assetToFullUrl(blueprint.script),
-                config: blueprint.config,
-                preload: blueprint.preload
-              }
-            }
-          }
-          const jsonStr = JSON.stringify(clipboardData, null, 2)
-          
-          // Copy to system clipboard
-          await navigator.clipboard.writeText(jsonStr)
-          
-          // Show feedback in chat
-          this.world.chat.add({
-            id: uuid(),
-            from: null,
-            fromId: null,
-            body: 'Object data copied to clipboard with full URLs',
-            createdAt: moment().toISOString(),
-          })
-        } catch (err) {
-          console.error('Failed to copy to clipboard:', err)
-          this.world.chat.add({
-            id: uuid(),
-            from: null,
-            fromId: null,
-            body: 'Failed to copy object data',
-            createdAt: moment().toISOString(),
-          })
-        }
       }
     }
   }
