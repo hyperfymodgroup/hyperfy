@@ -650,7 +650,36 @@ export class ClientEditor extends System {
 
       // Convert domain URLs back to asset:// format
       const modelUrl = data.blueprint.model.replace(/^https?:\/\/[^\/]+\/assets\//, 'asset://')
-      const scriptUrl = data.blueprint.script ? data.blueprint.script.replace(/^https?:\/\/[^\/]+\/assets\//, 'asset://') : null
+      let scriptUrl = null
+
+      // Handle script if present
+      if (data.blueprint.script) {
+        try {
+          // Fetch the script file
+          const scriptResponse = await fetch(data.blueprint.script)
+          if (!scriptResponse.ok) {
+            throw new Error(`Failed to fetch script: ${scriptResponse.statusText}`)
+          }
+          
+          // Convert the response to a File object
+          const scriptBlob = await scriptResponse.blob()
+          const scriptFileName = data.blueprint.script.split('/').pop()
+          const scriptFile = new File([scriptBlob], scriptFileName, { type: 'application/javascript' })
+          
+          // Hash and upload the script file
+          const scriptHash = await hashFile(scriptFile)
+          scriptUrl = `asset://${scriptHash}.js`
+          
+          // Cache script locally
+          this.world.loader.insert('script', scriptUrl, scriptFile)
+          
+          // Upload script to server
+          await this.world.network.upload(scriptFile)
+        } catch (err) {
+          console.error('Failed to process script:', err)
+          // Continue without script if it fails
+        }
+      }
 
       // Create blueprint
       const blueprint = {
