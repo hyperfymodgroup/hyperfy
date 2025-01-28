@@ -131,37 +131,88 @@ export class ClientEditor extends System {
           onClick: async () => {
             this.setContext(null)
             try {
-              // prep new user data
+              // Get current player data
               const player = this.world.entities.player
               const prevUser = player.data.user
               const newUser = cloneDeep(player.data.user)
+
+              // Get the target VRM's position and rotation
+              const targetPosition = [...entity.data.position]
+              const targetQuaternion = [...entity.data.quaternion]
+
+              // Only proceed if we have a previous avatar to leave behind
+              if (prevUser.avatar && prevUser.avatar.endsWith('.vrm')) {
+                // Create blueprint for the old avatar first
+                const oldBlueprint = {
+                  id: uuid(),
+                  version: 0,
+                  model: prevUser.avatar,
+                  script: null,
+                  config: {},
+                  preload: false
+                }
+                
+                // Register the blueprint
+                this.world.blueprints.add(oldBlueprint, true)
+
+                // Create a new entity from the old avatar at the target VRM's position
+                const oldAvatarData = {
+                  id: uuid(),
+                  type: 'app',
+                  blueprint: oldBlueprint.id,
+                  position: targetPosition, // Place old avatar where the new one was
+                  quaternion: targetQuaternion,
+                  mover: null,
+                  uploader: null,
+                  state: {}
+                }
+
+                // Add the old avatar as a static model
+                this.world.entities.add(oldAvatarData, true)
+
+                // Show effect in chat
+                this.world.chat.add({
+                  id: uuid(),
+                  from: null,
+                  fromId: null,
+                  body: '* Transferring consciousness to new avatar *',
+                  createdAt: moment().toISOString(),
+                })
+              }
+
+              // Update avatar
               newUser.avatar = blueprint.model
 
-              // update locally
-              player.modify({ user: newUser })
-
-              // update for everyone
-              this.world.network.send('entityModified', {
-                id: player.data.id,
-                user: newUser,
+              // Update locally first
+              player.modify({ 
+                user: newUser
               })
 
-              // Show feedback in chat
+              // Update for everyone
+              this.world.network.send('entityModified', {
+                id: player.data.id,
+                user: newUser
+              })
+
+              // Remove the target VRM since we're now using it
+              entity.destroy(true)
+
+              // Show success message
               this.world.chat.add({
                 id: uuid(),
                 from: null,
                 fromId: null,
-                body: 'Avatar equipped successfully',
+                body: '* Consciousness transfer complete *',
                 createdAt: moment().toISOString(),
               })
             } catch (err) {
-              console.error('Failed to equip avatar:', err)
+              console.error('Failed to transfer to new avatar:', err)
               // Show error in chat
               this.world.chat.add({
                 id: uuid(),
                 from: null,
                 fromId: null,
-                body: 'Failed to equip avatar',
+                body: '* Consciousness transfer failed *',
                 createdAt: moment().toISOString(),
               })
             }
@@ -746,15 +797,114 @@ export class ClientEditor extends System {
     const canEdit = hasRole(roles, 'admin', 'builder')
     if (!canEdit) return
 
+    // Get entity under mouse pointer
+    const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
+    let entity
+    for (const hit of hits) {
+      entity = hit.getEntity?.()
+      if (entity && entity.isApp) break
+    }
+
+    // Handle 'T' key for quick avatar swap
+    if (e.key.toLowerCase() === 't' && entity && entity.isApp) {
+      // Check if it's a VRM model
+      const blueprint = this.world.blueprints.get(entity.data.blueprint)
+      const isVrm = blueprint?.model?.toLowerCase().endsWith('.vrm')
+      
+      if (isVrm) {
+        e.preventDefault()
+        try {
+          // Get current player data
+          const player = this.world.entities.player
+          const prevUser = player.data.user
+          const newUser = cloneDeep(player.data.user)
+
+          // Get the target VRM's position and rotation
+          const targetPosition = [...entity.data.position]
+          const targetQuaternion = [...entity.data.quaternion]
+
+          // Only proceed if we have a previous avatar to leave behind
+          if (prevUser.avatar && prevUser.avatar.endsWith('.vrm')) {
+            // Create blueprint for the old avatar first
+            const oldBlueprint = {
+              id: uuid(),
+              version: 0,
+              model: prevUser.avatar,
+              script: null,
+              config: {},
+              preload: false
+            }
+            
+            // Register the blueprint
+            this.world.blueprints.add(oldBlueprint, true)
+
+            // Create a new entity from the old avatar at the target VRM's position
+            const oldAvatarData = {
+              id: uuid(),
+              type: 'app',
+              blueprint: oldBlueprint.id,
+              position: targetPosition, // Place old avatar where the new one was
+              quaternion: targetQuaternion,
+              mover: null,
+              uploader: null,
+              state: {}
+            }
+
+            // Add the old avatar as a static model
+            this.world.entities.add(oldAvatarData, true)
+
+            // Show effect in chat
+            this.world.chat.add({
+              id: uuid(),
+              from: null,
+              fromId: null,
+              body: '* Transferring consciousness to new avatar *',
+              createdAt: moment().toISOString(),
+            })
+          }
+
+          // Update avatar
+          newUser.avatar = blueprint.model
+
+          // Update locally first
+          player.modify({ 
+            user: newUser
+          })
+
+          // Update for everyone
+          this.world.network.send('entityModified', {
+            id: player.data.id,
+            user: newUser
+          })
+
+          // Remove the target VRM since we're now using it
+          entity.destroy(true)
+
+          // Show success message
+          this.world.chat.add({
+            id: uuid(),
+            from: null,
+            fromId: null,
+            body: '* Consciousness transfer complete *',
+            createdAt: moment().toISOString(),
+          })
+        } catch (err) {
+          console.error('Failed to transfer to new avatar:', err)
+          // Show error in chat
+          this.world.chat.add({
+            id: uuid(),
+            from: null,
+            fromId: null,
+            body: '* Consciousness transfer failed *',
+            createdAt: moment().toISOString(),
+          })
+        }
+        return
+      }
+    }
+
     // Handle delete keys
     if (e.key === 'Backspace' || e.key === 'Delete') {
-      const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
-      let entity
-      for (const hit of hits) {
-        entity = hit.getEntity?.()
-        if (entity && entity.isApp) break
-      }
-
       if (entity && entity.isApp) {
         e.preventDefault()
         try {
@@ -785,112 +935,50 @@ export class ClientEditor extends System {
 
     // Handle copy/cut/paste
     if (e.ctrlKey || e.metaKey) {
-      const hits = this.world.stage.raycastPointer(this.world.controls.pointer.position)
-      let entity
-      for (const hit of hits) {
-        entity = hit.getEntity?.()
-        if (entity && entity.isApp) break
-      }
+      if (entity && entity.isApp) {
+        e.preventDefault()
+        try {
+          // Get the blueprint data
+          const blueprint = this.world.blueprints.get(entity.data.blueprint)
+          if (!blueprint) throw new Error('Blueprint not found')
 
-      switch (e.key.toLowerCase()) {
-        case 'c': // Copy
-          if (entity && entity.isApp) {
-            e.preventDefault()
-            try {
-              // Get the blueprint data
-              const blueprint = this.world.blueprints.get(entity.data.blueprint)
-              if (!blueprint) throw new Error('Blueprint not found')
-
-              // Convert entity data to JSON string with full URLs
-              const clipboardData = {
-                type: 'hyperfy-entity',
-                data: {
-                  ...entity.data,
-                  blueprint: {
-                    id: blueprint.id,
-                    model: this.assetToFullUrl(blueprint.model),
-                    script: this.assetToFullUrl(blueprint.script),
-                    config: blueprint.config,
-                    preload: blueprint.preload
-                  }
-                }
+          // Convert entity data to JSON string with full URLs
+          const clipboardData = {
+            type: 'hyperfy-entity',
+            data: {
+              ...entity.data,
+              blueprint: {
+                id: blueprint.id,
+                model: this.assetToFullUrl(blueprint.model),
+                script: this.assetToFullUrl(blueprint.script),
+                config: blueprint.config,
+                preload: blueprint.preload
               }
-              const jsonStr = JSON.stringify(clipboardData, null, 2)
-              
-              // Copy to system clipboard
-              await navigator.clipboard.writeText(jsonStr)
-              
-              // Show feedback in chat
-              this.world.chat.add({
-                id: uuid(),
-                from: null,
-                fromId: null,
-                body: 'Object data copied to clipboard with full URLs',
-                createdAt: moment().toISOString(),
-              })
-            } catch (err) {
-              console.error('Failed to copy to clipboard:', err)
-              this.world.chat.add({
-                id: uuid(),
-                from: null,
-                fromId: null,
-                body: 'Failed to copy object data',
-                createdAt: moment().toISOString(),
-              })
             }
           }
-          break
-
-        case 'x': // Cut
-          if (entity && entity.isApp) {
-            e.preventDefault()
-            try {
-              // Get the blueprint data
-              const blueprint = this.world.blueprints.get(entity.data.blueprint)
-              if (!blueprint) throw new Error('Blueprint not found')
-
-              // Convert entity data to JSON string with full URLs
-              const clipboardData = {
-                type: 'hyperfy-entity',
-                data: {
-                  ...entity.data,
-                  blueprint: {
-                    id: blueprint.id,
-                    model: this.assetToFullUrl(blueprint.model),
-                    script: this.assetToFullUrl(blueprint.script),
-                    config: blueprint.config,
-                    preload: blueprint.preload
-                  }
-                }
-              }
-              const jsonStr = JSON.stringify(clipboardData, null, 2)
-              
-              // Copy to system clipboard
-              await navigator.clipboard.writeText(jsonStr)
-              
-              // Remove the original entity
-              entity.destroy(true)
-              
-              // Show feedback in chat
-              this.world.chat.add({
-                id: uuid(),
-                from: null,
-                fromId: null,
-                body: 'Object data cut to clipboard with full URLs',
-                createdAt: moment().toISOString(),
-              })
-            } catch (err) {
-              console.error('Failed to cut to clipboard:', err)
-              this.world.chat.add({
-                id: uuid(),
-                from: null,
-                fromId: null,
-                body: 'Failed to cut object data',
-                createdAt: moment().toISOString(),
-              })
-            }
-          }
-          break
+          const jsonStr = JSON.stringify(clipboardData, null, 2)
+          
+          // Copy to system clipboard
+          await navigator.clipboard.writeText(jsonStr)
+          
+          // Show feedback in chat
+          this.world.chat.add({
+            id: uuid(),
+            from: null,
+            fromId: null,
+            body: 'Object data copied to clipboard with full URLs',
+            createdAt: moment().toISOString(),
+          })
+        } catch (err) {
+          console.error('Failed to copy to clipboard:', err)
+          this.world.chat.add({
+            id: uuid(),
+            from: null,
+            fromId: null,
+            body: 'Failed to copy object data',
+            createdAt: moment().toISOString(),
+          })
+        }
       }
     }
   }
