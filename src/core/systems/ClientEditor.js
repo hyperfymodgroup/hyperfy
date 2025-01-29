@@ -876,6 +876,32 @@ export class ClientEditor extends System {
       if (entity && entity.isApp) break
     }
 
+    // Handle 'g' key for moving objects
+    if (e.key.toLowerCase() === 'g' && entity && entity.isApp) {
+      e.preventDefault()
+      try {
+        entity.move()
+        // Show feedback in chat
+        this.world.chat.add({
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: '* Moving object - Click to place *',
+          createdAt: moment().toISOString(),
+        })
+      } catch (err) {
+        console.error('Failed to start moving object:', err)
+        this.world.chat.add({
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: '* Failed to start moving object *',
+          createdAt: moment().toISOString(),
+        })
+      }
+      return
+    }
+
     // Handle copy/cut/paste
     if (e.ctrlKey || e.metaKey) {
       switch (e.key.toLowerCase()) {
