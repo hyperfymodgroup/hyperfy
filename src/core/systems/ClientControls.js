@@ -1,6 +1,11 @@
 import { bindRotations } from '../extras/bindRotations'
 import * as THREE from '../extras/three'
 import { System } from './System'
+import { cloneDeep } from 'lodash-es'
+import { uuid } from '../utils'
+import moment from 'moment'
+import { HyperFone } from '../nodes/HyperFone'
+import { createNode } from '../extras/createNode'
 
 const LMB = 1 // bitmask
 const RMB = 2 // bitmask
@@ -34,6 +39,17 @@ export class ClientControls extends System {
     this.scroll = {
       delta: 0,
     }
+    this.buildMode = {
+      active: false,
+      selectedEntity: null,
+      transformMode: null,
+      snapToGrid: true,
+      gridSize: 1,
+      hoveredEntity: null, // Track entity under mouse
+    }
+    this.hyperFone = null
+    this.hyperFoneActive = false
+    this.tabletModel = null
   }
 
   preFixedUpdate() {
@@ -175,8 +191,89 @@ export class ClientControls extends System {
   }
 
   onKeyDown = e => {
-    if (e.repeat) return
     if (this.isInputFocused()) return
+    
+    // Handle build mode shortcuts
+    if (e.ctrlKey || e.metaKey) {
+      switch (e.key.toLowerCase()) {
+        case 'c': // Copy
+          if (this.buildMode.hoveredEntity?.isApp) {
+            e.preventDefault()
+            this.copyEntity(this.buildMode.hoveredEntity)
+          }
+          break
+
+        case 'x': // Cut
+          if (this.buildMode.hoveredEntity?.isApp) {
+            e.preventDefault()
+            this.copyEntity(this.buildMode.hoveredEntity)
+            this.buildMode.hoveredEntity.destroy(true)
+            this.buildMode.hoveredEntity = null
+          }
+          break
+
+        case 'v': // Paste
+          e.preventDefault()
+          this.pasteEntity()
+          break
+      }
+      return
+    }
+
+    // Single key shortcuts
+    switch (e.key.toLowerCase()) {
+      case 'delete':
+      case 'backspace':
+        if (this.buildMode.hoveredEntity?.isApp) {
+          e.preventDefault()
+          this.buildMode.hoveredEntity.destroy(true)
+          this.buildMode.hoveredEntity = null
+          this.buildMode.selectedEntity = null
+        }
+        break
+
+      case 'g': // Grab/Move
+        if (this.buildMode.hoveredEntity?.isApp) {
+          e.preventDefault()
+          this.buildMode.selectedEntity = this.buildMode.hoveredEntity
+          this.buildMode.transformMode = 'translate'
+          this.startTransform()
+        }
+        break
+
+      case 'r': // Rotate
+        if (this.buildMode.hoveredEntity?.isApp) {
+          e.preventDefault()
+          this.buildMode.selectedEntity = this.buildMode.hoveredEntity
+          this.buildMode.transformMode = 'rotate'
+          this.startTransform()
+        }
+        break
+
+      case 's': // Scale
+        if (this.buildMode.hoveredEntity?.isApp) {
+          e.preventDefault()
+          this.buildMode.selectedEntity = this.buildMode.hoveredEntity
+          this.buildMode.transformMode = 'scale'
+          this.startTransform()
+        }
+        break
+
+      case 'escape':
+        if (this.buildMode.transformMode) {
+          this.cancelTransform()
+        }
+        this.buildMode.selectedEntity = null
+        break
+    }
+
+    // Add HyperFone toggle
+    if (e.code === 'KeyP') {
+      this.toggleHyperFone()
+    }
+
+    // Handle existing key events
+    if (e.repeat) return
     const code = e.code
     for (const control of this.controls) {
       control.api.buttons[code] = true
@@ -204,24 +301,77 @@ export class ClientControls extends System {
   }
 
   onPointerDown = e => {
-    this.checkPointerChanges(e)
+    if (this.isInputFocused()) return
+
+    // Update pointer state
+    const code = e.button === 0 ? LMB_CODE : e.button === 2 ? RMB_CODE : null
+    if (code) {
+      for (const control of this.controls) {
+        control.api.buttons[code] = true
+        control.api.pressed[code] = true
+        const consume = control.options.onPress?.(code)
+        if (consume) break
+      }
+    }
+
+    // Handle build mode selection
+    if (e.button === 0) { // Left click
+      if (this.buildMode.hoveredEntity) {
+        this.buildMode.selectedEntity = this.buildMode.hoveredEntity
+        // Highlight selected entity (implement visual feedback)
+      } else {
+        this.buildMode.selectedEntity = null
+        // Remove highlight
+      }
+    }
+
+    // Prevent default right-click menu
+    if (e.button === 2) {
+      e.preventDefault()
+    }
   }
 
   onPointerMove = e => {
-    this.checkPointerChanges(e)
-    const rect = this.viewport.getBoundingClientRect()
-    const offsetX = e.pageX - rect.left
-    const offsetY = e.pageY - rect.top
-    this.pointer.coords.x = Math.max(0, Math.min(1, offsetX / rect.width)) // prettier-ignore
-    this.pointer.coords.y = Math.max(0, Math.min(1, offsetY / rect.height)) // prettier-ignore
-    this.pointer.position.x = offsetX
-    this.pointer.position.y = offsetY
+    if (this.pointer.locked) {
     this.pointer.delta.x += e.movementX
     this.pointer.delta.y += e.movementY
+    } else {
+      const rect = this.viewport.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      this.pointer.delta.x = x - this.pointer.position.x
+      this.pointer.delta.y = y - this.pointer.position.y
+      this.pointer.position.x = x
+      this.pointer.position.y = y
+      this.pointer.coords.x = x / rect.width
+      this.pointer.coords.y = y / rect.height
+    }
+
+    // Update controls
+    for (const control of this.controls) {
+      const consume = control.options.onPointer?.()
+      if (consume) break
+    }
   }
 
   onPointerUp = e => {
-    this.checkPointerChanges(e)
+    if (this.isInputFocused()) return
+
+    const code = e.button === 0 ? LMB_CODE : e.button === 2 ? RMB_CODE : null
+    if (code) {
+      for (const control of this.controls) {
+        control.api.buttons[code] = false
+        control.api.released[code] = true
+        const consume = control.options.onRelease?.(code)
+        if (consume) break
+      }
+    }
+
+    // If we were transforming, finish the transform
+    if (this.buildMode.transformMode && e.button === 0) {
+      this.buildMode.transformMode = null
+      this.buildMode.transform = null
+    }
   }
 
   checkPointerChanges(e) {
@@ -270,42 +420,24 @@ export class ClientControls extends System {
   }
 
   async lockPointer() {
+    if (!this.isPointerLocked()) {
     this.pointer.shouldLock = true
-    try {
-      await this.viewport.requestPointerLock()
-      return true
-    } catch (err) {
-      // console.log('pointerlock denied, too quick?')
-      return false
+      this.viewport.requestPointerLock()
     }
   }
 
   unlockPointer() {
-    this.pointer.shouldLock = false
-    if (!this.pointer.locked) return
-    document.exitPointerLock()
-    this.onPointerLockEnd()
-  }
-
-  onPointerLockChange = e => {
-    const didPointerLock = !!document.pointerLockElement
-    if (didPointerLock) {
-      this.onPointerLockStart()
-    } else {
-      this.onPointerLockEnd()
+    if (this.isPointerLocked()) {
+      document.exitPointerLock()
     }
+    this.pointer.shouldLock = false
   }
 
-  onPointerLockStart() {
-    if (this.pointer.locked) return
-    this.pointer.locked = true
-    // pointerlock is async so if its no longer meant to be locked, exit
-    if (!this.pointer.shouldLock) this.unlockPointer()
-  }
-
-  onPointerLockEnd() {
-    if (!this.pointer.locked) return
-    this.pointer.locked = false
+  onPointerLockChange = () => {
+    this.pointer.locked = this.isPointerLocked()
+    if (!this.pointer.locked) {
+      this.pointer.shouldLock = false
+    }
   }
 
   onScroll = e => {
@@ -374,5 +506,351 @@ export class ClientControls extends System {
 
   isInputFocused() {
     return document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
+  }
+
+  async copyEntity(entity) {
+    try {
+      // Ensure we have clipboard permissions
+      if (!navigator.clipboard) {
+        throw new Error('Clipboard API not available');
+      }
+
+      // Get the blueprint data
+      const blueprint = this.world.blueprints.get(entity.data.blueprint);
+      if (!blueprint) throw new Error('Blueprint not found');
+
+      // Convert entity data to JSON string with full URLs
+      const clipboardData = {
+        type: 'hyperfy-entity',
+        data: {
+          ...entity.data,
+          blueprint: {
+            id: blueprint.id,
+            model: blueprint.model ? this.assetToFullUrl(blueprint.model) : null,
+            script: blueprint.script ? this.assetToFullUrl(blueprint.script) : null,
+            config: blueprint.config || {},
+            preload: blueprint.preload || false,
+          },
+        },
+      };
+      
+      // Convert to string with pretty formatting
+      const jsonStr = JSON.stringify(clipboardData, null, 2);
+
+      try {
+        // Try using the clipboard API
+        await navigator.clipboard.writeText(jsonStr);
+      } catch (clipboardErr) {
+        // Fallback to execCommand for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = jsonStr;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        } catch (execErr) {
+          document.body.removeChild(textarea);
+          throw execErr;
+        }
+      }
+
+      // Show success message
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: 'Object copied to clipboard',
+        createdAt: moment().toISOString(),
+      });
+
+      // Store in local memory as fallback
+      this.lastCopiedEntity = clipboardData;
+
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: 'Failed to copy object',
+        createdAt: moment().toISOString(),
+      });
+    }
+  }
+
+  async pasteEntity() {
+    try {
+      let clipboardData;
+      
+      try {
+        // Try to get data from clipboard
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          clipboardData = JSON.parse(text);
+        }
+      } catch (clipboardErr) {
+        console.warn('Could not access clipboard:', clipboardErr);
+        // Fall back to last copied entity
+        if (this.lastCopiedEntity) {
+          clipboardData = this.lastCopiedEntity;
+        }
+      }
+
+      if (!clipboardData || clipboardData.type !== 'hyperfy-entity' || !clipboardData.data) {
+        throw new Error('No valid entity data found in clipboard');
+      }
+
+      // Rest of the paste logic remains the same
+      const hit = this.world.stage.raycastPointer(this.pointer.position)[0];
+      const position = hit ? hit.point.toArray() : [0, 0, 0];
+      
+      const newData = cloneDeep(clipboardData.data);
+      newData.id = uuid();
+      newData.position = position;
+      newData.mover = this.world.network.id;
+      newData.uploader = this.world.network.id;
+
+      if (newData.blueprint && typeof newData.blueprint === 'object') {
+        const blueprintData = newData.blueprint;
+        const blueprint = {
+          id: uuid(),
+          version: 0,
+          model: blueprintData.model ? this.fullUrlToAsset(blueprintData.model) : null,
+          script: blueprintData.script ? this.fullUrlToAsset(blueprintData.script) : null,
+          config: blueprintData.config || {},
+          preload: blueprintData.preload || false,
+        };
+
+        this.world.blueprints.add(blueprint, true);
+        newData.blueprint = blueprint.id;
+        const app = this.world.entities.add(newData, true);
+
+        // Handle asset uploads
+        if (blueprint.model) {
+          await this.uploadAsset(blueprintData.model, 'model', blueprint.model);
+        }
+        if (blueprint.script) {
+          await this.uploadAsset(blueprintData.script, 'script', blueprint.script);
+        }
+        
+        app.onUploaded();
+        this.buildMode.selectedEntity = app;
+      }
+    } catch (err) {
+      console.error('Failed to paste:', err);
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `Failed to paste object: ${err.message}`,
+        createdAt: moment().toISOString(),
+      });
+    }
+  }
+
+  async uploadAsset(sourceUrl, type, assetUrl) {
+    const response = await fetch(sourceUrl)
+    if (!response.ok) throw new Error(`Failed to fetch ${type}`)
+    const blob = await response.blob()
+    const file = new File([blob], assetUrl.split('/').pop(), { 
+      type: type === 'model' ? 'model/gltf-binary' : 'application/javascript' 
+    })
+    
+    this.world.loader.insert(type, assetUrl, file)
+    await this.world.network.upload(file)
+  }
+
+  startTransform() {
+    if (!this.buildMode.selectedEntity) return
+    
+    const entity = this.buildMode.selectedEntity
+    this.buildMode.transform = {
+      startPos: [...entity.data.position],
+      startRot: [...entity.data.quaternion],
+      startScale: entity.data.scale ? [...entity.data.scale] : [1, 1, 1],
+      startPointer: new THREE.Vector2(this.pointer.position.x, this.pointer.position.y),
+      plane: this.createTransformPlane(entity)
+    }
+  }
+
+  updateTransform(delta) {
+    if (!this.buildMode.selectedEntity || !this.buildMode.transform) return
+
+    const entity = this.buildMode.selectedEntity
+    const transform = this.buildMode.transform
+    const mode = this.buildMode.transformMode
+
+    // Raycasting to transform plane
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(
+      new THREE.Vector2(
+        (this.pointer.position.x / this.screen.width) * 2 - 1,
+        -(this.pointer.position.y / this.screen.height) * 2 + 1
+      ),
+      this.world.camera
+    )
+
+    const intersection = raycaster.ray.intersectPlane(transform.plane, new THREE.Vector3())
+    if (!intersection) return
+
+    switch (mode) {
+      case 'translate':
+        // Update position based on plane intersection
+        const newPos = intersection.toArray()
+        if (this.buildMode.snapToGrid) {
+          newPos[0] = Math.round(newPos[0] / this.buildMode.gridSize) * this.buildMode.gridSize
+          newPos[1] = Math.round(newPos[1] / this.buildMode.gridSize) * this.buildMode.gridSize
+          newPos[2] = Math.round(newPos[2] / this.buildMode.gridSize) * this.buildMode.gridSize
+        }
+        entity.modify({ position: newPos })
+        break
+
+      case 'rotate':
+        // Calculate rotation based on mouse movement around entity center
+        const center = new THREE.Vector3(...transform.startPos)
+        const angle = Math.atan2(
+          intersection.x - center.x,
+          intersection.z - center.z
+        )
+        const quaternion = new THREE.Quaternion()
+        quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle)
+        entity.modify({ quaternion: quaternion.toArray() })
+        break
+
+      case 'scale':
+        // Scale based on distance from start position
+        const startDist = new THREE.Vector3(...transform.startPos).distanceTo(
+          new THREE.Vector3(transform.startPointer.x, transform.startPointer.y, 0)
+        )
+        const currentDist = new THREE.Vector3(...transform.startPos).distanceTo(
+          new THREE.Vector3(this.pointer.position.x, this.pointer.position.y, 0)
+        )
+        const scale = currentDist / startDist
+        entity.modify({ scale: [scale, scale, scale] })
+        break
+    }
+  }
+
+  createTransformPlane(entity) {
+    // Create a plane aligned with the camera view for transforming
+    const normal = new THREE.Vector3(0, 1, 0)
+    const point = new THREE.Vector3(...entity.data.position)
+    return new THREE.Plane(normal, -point.dot(normal))
+  }
+
+  cancelTransform() {
+    if (!this.buildMode.selectedEntity || !this.buildMode.transform) return
+    
+    const entity = this.buildMode.selectedEntity
+    const transform = this.buildMode.transform
+    
+    // Reset to original transform
+    entity.modify({
+      position: transform.startPos,
+      quaternion: transform.startRot,
+      scale: transform.startScale
+    })
+    
+    this.buildMode.transformMode = null
+    this.buildMode.transform = null
+  }
+
+  // Helper methods for URL conversion
+  assetToFullUrl(assetUrl) {
+    if (!assetUrl || !assetUrl.startsWith('asset://')) return assetUrl
+    return `${window.location.origin}/assets/${assetUrl.replace('asset://', '')}`
+  }
+
+  fullUrlToAsset(fullUrl) {
+    if (!fullUrl) return fullUrl
+    const match = fullUrl.match(/\/assets\/(.+)$/)
+    if (!match) return fullUrl
+    return `asset://${match[1]}`
+  }
+
+  update(delta) {
+    // Update hovered entity
+    const hits = this.world.stage.raycastPointer(this.pointer.position)
+    let entity = null
+    for (const hit of hits) {
+      entity = hit.getEntity?.()
+      if (entity && entity.isApp) break
+    }
+    this.buildMode.hoveredEntity = entity
+
+    // Handle transform operations if active
+    if (this.buildMode.transformMode && this.buildMode.selectedEntity) {
+      this.updateTransform(delta)
+    }
+  }
+
+  isPointerLocked() {
+    return document.pointerLockElement === this.viewport
+  }
+
+  async initHyperFone() {
+    if (!this.hyperFone) {
+      this.hyperFone = new HyperFone()
+      this.hyperFone.position.set(0, 2.5, 0)
+      this.world.entities.player?.base.add(this.hyperFone)
+      
+      // Load and setup tablet model
+      if (!this.tabletModel) {
+        const player = this.world.entities.player
+        if (player && player.avatar) {
+          // Create tablet node
+          const tablet = createNode({
+            name: 'mesh',
+            type: 'model',
+            model: 'asset://tablet.glb',
+            active: false
+          })
+          
+          // Find the hand bone to attach to
+          const handBone = player.avatar.raw.humanoid.getRawBoneNode('rightHand')
+          if (handBone) {
+            handBone.add(tablet)
+            // Position and rotate relative to hand
+            tablet.position.set(0, 0, 0)
+            tablet.rotation.set(0, 0, 0)
+            tablet.scale.set(1, 1, 1)
+          }
+          
+          this.tabletModel = tablet
+        }
+      }
+    }
+  }
+
+  toggleHyperFone() {
+    this.initHyperFone()
+    this.hyperFoneActive = !this.hyperFoneActive
+    this.hyperFone.active = this.hyperFoneActive
+
+    // Toggle tablet visibility
+    if (this.tabletModel) {
+      this.tabletModel.active = this.hyperFoneActive
+    }
+
+    // Set player emote - now handled by PlayerLocal update
+    const player = this.world.entities.player
+    if (player) {
+      player.setEmote(this.hyperFoneActive ? 'asset://emote-phone.glb' : 'asset://emote-idle.glb')
+    }
+  }
+
+  // Add cleanup method
+  cleanup() {
+    if (this.tabletModel) {
+      this.tabletModel.deactivate()
+      this.tabletModel = null
+    }
+    if (this.hyperFone) {
+      this.hyperFone.deactivate()
+      this.hyperFone = null
+    }
   }
 }

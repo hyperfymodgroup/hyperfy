@@ -13,6 +13,7 @@ const names = [
   'entityEvent',
   'entityRemoved',
   'playerTeleport',
+  'hyperFoneState',
 ]
 
 const byName = {}

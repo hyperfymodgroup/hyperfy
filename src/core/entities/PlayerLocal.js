@@ -575,17 +575,43 @@ export class PlayerLocal extends Entity {
     this.cam.position.copy(this.base.position)
     this.cam.position.y += 1.6
 
-    // emote
-    if (this.jumping) {
-      this.emote = Emotes.FLOAT
+    // Update emote with debug logging
+    const isMoving = this.moving && this.moveDir.lengthSq() > 0.01; // Use lengthSq for better precision
+    
+    if (this.world.controls.hyperFoneActive) {
+      if (isMoving) {
+        this.emote = Emotes.PHONE_WALK;
+        console.log('Should be phone walking', {
+          moving: this.moving,
+          moveDir: this.moveDir.toArray(),
+          emote: this.emote,
+          emoteFile: emotes[this.emote]
+        });
+      } else {
+        this.emote = Emotes.PHONE;
+        console.log('Should be phone standing', {
+          moving: this.moving,
+          moveDir: this.moveDir.toArray(),
+          emote: this.emote,
+          emoteFile: emotes[this.emote]
+        });
+      }
+    } else if (this.jumping) {
+      this.emote = Emotes.FLOAT;
     } else if (this.falling) {
-      this.emote = Emotes.FLOAT
-    } else if (this.moving) {
-      this.emote = this.running ? Emotes.RUN : Emotes.WALK
+      this.emote = Emotes.FLOAT;
+    } else if (isMoving) {
+      this.emote = this.running ? Emotes.RUN : Emotes.WALK;
     } else {
-      this.emote = Emotes.IDLE
+      this.emote = Emotes.IDLE;
     }
-    this.avatar?.setEmote(emotes[this.emote])
+
+    // Apply the emote animation with force update
+    if (this.avatar) {
+      // Force update even if same emote to ensure animation plays
+      this.avatar.setEmote(emotes[this.emote]);
+      this.lastEmote = this.emote;
+    }
 
     // send network updates
     this.lastSendAt += delta
@@ -661,6 +687,14 @@ export class PlayerLocal extends Entity {
       this.proxy = createPlayerProxy(this)
     }
     return this.proxy
+  }
+
+  destroy(local) {
+    // Cleanup tablet and HyperFone
+    this.world.controls.cleanup()
+    
+    // ... rest of existing destroy code ...
+    super.destroy(local)
   }
 }
 
