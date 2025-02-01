@@ -11,6 +11,7 @@ import { ClientStats } from './systems/ClientStats'
 import { ClientEditor } from './systems/ClientEditor'
 import { ClientActions } from './systems/ClientActions'
 import { Nametags } from './systems/Nametags'
+import { BuildMode } from './systems/BuildMode'
 
 export function createClientWorld() {
   const world = new World()
@@ -25,5 +26,7 @@ export function createClientWorld() {
   world.register('editor', ClientEditor)
   world.register('actions', ClientActions)
   world.register('nametags', Nametags)
+  world.register('buildMode', BuildMode)
+
   return world
 }
