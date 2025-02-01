@@ -9,8 +9,10 @@ import { createNode } from '../extras/createNode'
 
 const LMB = 1 // bitmask
 const RMB = 2 // bitmask
+const MMB = 4 // bitmask
 const LMB_CODE = 'MouseLeft'
 const RMB_CODE = 'MouseRight'
+const MMB_CODE = 'MouseMiddle'
 
 /**
  * Control System
@@ -265,6 +267,19 @@ export class ClientControls extends System {
         }
         this.buildMode.selectedEntity = null
         break
+
+      case 't': // Quick VRM avatar swap
+        if (this.buildMode.hoveredEntity?.isApp) {
+          const entity = this.buildMode.hoveredEntity
+          const blueprint = this.world.blueprints.get(entity.data.blueprint)
+          const isVrm = blueprint?.model?.toLowerCase().endsWith('.vrm')
+          
+          if (isVrm) {
+            e.preventDefault()
+            this.handleVrmSwap(entity, blueprint)
+          }
+        }
+        break
     }
 
     // Add HyperFone toggle
@@ -304,30 +319,42 @@ export class ClientControls extends System {
     if (this.isInputFocused()) return
 
     // Update pointer state
-    const code = e.button === 0 ? LMB_CODE : e.button === 2 ? RMB_CODE : null
+    const code = e.button === 0 ? LMB_CODE : 
+                e.button === 1 ? MMB_CODE :
+                e.button === 2 ? RMB_CODE : null
+    
     if (code) {
-      for (const control of this.controls) {
-        control.api.buttons[code] = true
-        control.api.pressed[code] = true
-        const consume = control.options.onPress?.(code)
-        if (consume) break
-      }
+        // Handle middle click grab
+        if (code === MMB_CODE && this.buildMode.hoveredEntity?.isApp) {
+            e.preventDefault()
+            // Set the entity as moving
+            const entity = this.buildMode.hoveredEntity
+            entity.modify({ 
+                mover: this.world.network.id 
+            })
+        }
+
+        // Regular button handling
+        for (const control of this.controls) {
+            control.api.buttons[code] = true
+            control.api.pressed[code] = true
+            const consume = control.options.onPress?.(code)
+            if (consume) break
+        }
     }
 
     // Handle build mode selection
     if (e.button === 0) { // Left click
-      if (this.buildMode.hoveredEntity) {
-        this.buildMode.selectedEntity = this.buildMode.hoveredEntity
-        // Highlight selected entity (implement visual feedback)
-      } else {
-        this.buildMode.selectedEntity = null
-        // Remove highlight
-      }
+        if (this.buildMode.hoveredEntity) {
+            this.buildMode.selectedEntity = this.buildMode.hoveredEntity
+        } else {
+            this.buildMode.selectedEntity = null
+        }
     }
 
     // Prevent default right-click menu
     if (e.button === 2) {
-      e.preventDefault()
+        e.preventDefault()
     }
   }
 
@@ -357,20 +384,27 @@ export class ClientControls extends System {
   onPointerUp = e => {
     if (this.isInputFocused()) return
 
-    const code = e.button === 0 ? LMB_CODE : e.button === 2 ? RMB_CODE : null
+    const code = e.button === 0 ? LMB_CODE :
+                e.button === 1 ? MMB_CODE :
+                e.button === 2 ? RMB_CODE : null
+                
     if (code) {
-      for (const control of this.controls) {
-        control.api.buttons[code] = false
-        control.api.released[code] = true
-        const consume = control.options.onRelease?.(code)
-        if (consume) break
-      }
-    }
+        // Handle middle click release
+        if (code === MMB_CODE) {
+            // Find any entity being moved by this client and stop moving it
+            Object.values(this.world.entities.list).forEach(entity => {
+                if (entity.data.mover === this.world.network.id) {
+                    entity.modify({ mover: null })
+                }
+            })
+        }
 
-    // If we were transforming, finish the transform
-    if (this.buildMode.transformMode && e.button === 0) {
-      this.buildMode.transformMode = null
-      this.buildMode.transform = null
+        for (const control of this.controls) {
+            control.api.buttons[code] = false
+            control.api.released[code] = true
+            const consume = control.options.onRelease?.(code)
+            if (consume) break
+        }
     }
   }
 
@@ -416,6 +450,27 @@ export class ClientControls extends System {
         const consume = control.options.onRelease?.(RMB_CODE)
         if (consume) break
       }
+    }
+    const mmb = !!(e.buttons & MMB)
+    // middle mouse down
+    if (!this.mmbDown && mmb) {
+        this.mmbDown = true
+        for (const control of this.controls) {
+            control.api.buttons[MMB_CODE] = true
+            control.api.pressed[MMB_CODE] = true
+            const consume = control.options.onPress?.(MMB_CODE)
+            if (consume) break
+        }
+    }
+    // middle mouse up
+    if (this.mmbDown && !mmb) {
+        this.mmbDown = false
+        for (const control of this.controls) {
+            control.api.buttons[MMB_CODE] = false
+            control.api.released[MMB_CODE] = true
+            const consume = control.options.onRelease?.(MMB_CODE)
+            if (consume) break
+        }
     }
   }
 
@@ -776,14 +831,28 @@ export class ClientControls extends System {
     const hits = this.world.stage.raycastPointer(this.pointer.position)
     let entity = null
     for (const hit of hits) {
-      entity = hit.getEntity?.()
-      if (entity && entity.isApp) break
+        entity = hit.getEntity?.()
+        if (entity && entity.isApp) break
     }
     this.buildMode.hoveredEntity = entity
 
+    // Handle moving entities
+    if (this.mmbDown) {
+        const hit = this.world.stage.raycastPointer(this.pointer.position)[0]
+        if (hit) {
+            Object.values(this.world.entities.list).forEach(entity => {
+                if (entity.data.mover === this.world.network.id) {
+                    entity.modify({ 
+                        position: hit.point.toArray() 
+                    })
+                }
+            })
+        }
+    }
+
     // Handle transform operations if active
     if (this.buildMode.transformMode && this.buildMode.selectedEntity) {
-      this.updateTransform(delta)
+        this.updateTransform(delta)
     }
   }
 
@@ -851,6 +920,96 @@ export class ClientControls extends System {
     if (this.hyperFone) {
       this.hyperFone.deactivate()
       this.hyperFone = null
+    }
+  }
+
+  // Add this new method to handle VRM swapping
+  async handleVrmSwap(targetEntity, blueprint) {
+    try {
+      // Get current player data
+      const player = this.world.entities.player
+      const prevUser = player.data.user
+      const newUser = cloneDeep(prevUser)
+
+      // Get the target VRM's position and rotation
+      const targetPosition = [...targetEntity.data.position]
+      const targetQuaternion = [...targetEntity.data.quaternion]
+
+      // Only create old avatar entity if we have a previous VRM
+      if (prevUser.avatar && prevUser.avatar.endsWith('.vrm')) {
+        // Create blueprint for the old avatar
+        const oldBlueprint = {
+          id: uuid(),
+          version: 0,
+          model: prevUser.avatar,
+          script: null,
+          config: {},
+          preload: false
+        }
+        
+        // Register the blueprint
+        this.world.blueprints.add(oldBlueprint, true)
+
+        // Create entity from old avatar
+        const oldAvatarData = {
+          id: uuid(),
+          type: 'app',
+          blueprint: oldBlueprint.id,
+          position: targetPosition,
+          quaternion: targetQuaternion,
+          mover: null,
+          uploader: null,
+          state: {}
+        }
+
+        // Add the old avatar as static model
+        this.world.entities.add(oldAvatarData, true)
+
+        // Show transfer effect
+        this.world.chat.add({
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: '* Transferring consciousness to new avatar *',
+          createdAt: moment().toISOString(),
+        })
+      }
+
+      // Update to new avatar
+      newUser.avatar = blueprint.model
+
+      // Update locally
+      player.modify({ 
+        user: newUser
+      })
+
+      // Sync with network
+      this.world.network.send('entityModified', {
+        id: player.data.id,
+        user: newUser
+      })
+
+      // Remove the target VRM
+      targetEntity.destroy(true)
+
+      // Show success message
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: '* Consciousness transfer complete *',
+        createdAt: moment().toISOString(),
+      })
+
+    } catch (err) {
+      console.error('Failed to transfer to new avatar:', err)
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: '* Consciousness transfer failed *',
+        createdAt: moment().toISOString(),
+      })
     }
   }
 }
