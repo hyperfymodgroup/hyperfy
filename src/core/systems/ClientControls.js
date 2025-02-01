@@ -324,14 +324,36 @@ export class ClientControls extends System {
                 e.button === 2 ? RMB_CODE : null
     
     if (code) {
-        // Handle middle click grab
+        // Handle middle click grab with optional duplication
         if (code === MMB_CODE && this.buildMode.hoveredEntity?.isApp) {
             e.preventDefault()
-            // Set the entity as moving
-            const entity = this.buildMode.hoveredEntity
-            entity.modify({ 
-                mover: this.world.network.id 
-            })
+            
+            // If Ctrl is held, duplicate the entity first
+            if (e.ctrlKey) {
+                const entity = this.buildMode.hoveredEntity
+                const data = {
+                    id: uuid(),
+                    type: 'app',
+                    blueprint: entity.data.blueprint,
+                    position: entity.data.position,
+                    quaternion: entity.data.quaternion,
+                    scale: entity.data.scale,
+                    mover: this.world.network.id,
+                    uploader: null,
+                    state: {},
+                }
+                // Create the duplicate and set it as the moving entity
+                const duplicate = this.world.entities.add(data, true)
+                duplicate.modify({ 
+                    mover: this.world.network.id 
+                })
+            } else {
+                // Regular move without duplication
+                const entity = this.buildMode.hoveredEntity
+                entity.modify({ 
+                    mover: this.world.network.id 
+                })
+            }
         }
 
         // Regular button handling
