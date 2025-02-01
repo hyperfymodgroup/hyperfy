@@ -101,7 +101,7 @@ export class App extends Entity {
       this.abortController = new AbortController()
       this.script = script
       try {
-        this.script.exec(this.getWorldProxy(), this.getAppProxy(), this.fetch)
+        this.script.exec(this.getWorldProxy(), this.getAppProxy(), this.fetch, blueprint.config)
       } catch (err) {
         console.error('script crashed')
         console.error(err)
@@ -155,6 +155,8 @@ export class App extends Entity {
     // abort fetch's etc
     this.abortController?.abort()
     this.abortController = null
+    // clear config
+    this.onConfigure?.(null)
   }
 
   fixedUpdate(delta) {

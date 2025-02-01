@@ -166,6 +166,7 @@ export class UI extends Node {
         this.mesh.matrixWorld.compose(v1, iQuaternion, iScale)
       } else {
         this.mesh.matrixWorld.copy(this.matrixWorld)
+        this.ctx.world.stage.octree.move(this.sItem)
       }
     }
   }

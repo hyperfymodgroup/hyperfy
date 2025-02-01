@@ -2,6 +2,8 @@ export { Group as group } from './Group.js'
 export { Mesh as mesh } from './Mesh.js'
 export { LOD as lod } from './LOD.js'
 
+export { Audio as audio } from './Audio.js'
+
 export { Avatar as avatar } from './Avatar.js'
 export { Action as action } from './Action.js'
 export { Nametag as nametag } from './Nametag.js'

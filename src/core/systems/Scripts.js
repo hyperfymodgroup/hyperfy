@@ -64,7 +64,7 @@ function wrapRawCode(code) {
   return `
   (function() {
     const shared = {}
-    return (world, app, fetch) => {
+    return (world, app, fetch, config) => {
       ${code}
     }
   })()

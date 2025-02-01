@@ -28,6 +28,8 @@ Whether the collider is a trigger. Defaults to `false`.
 
 A trigger will not collide with anything, and instead will trigger the `onTriggerEnter` and `onTriggerLeave` functions on the parent rigidbody.
 
+NOTE: Triggers are forced to act like convex shapes. This is a limitation in the physics engine.
+
 ### `collider.{...Node}`
 
 Inherits all [Node](/docs/ref/Node.md) properties

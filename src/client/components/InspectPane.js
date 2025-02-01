@@ -938,6 +938,12 @@ const kinds = {
     exts: ['hdr'],
     placeholder: '.hdr',
   },
+  audio: {
+    type: 'audio',
+    accept: '.mp3',
+    exts: ['mp3'],
+    placeholder: '.mp3',
+  },
 }
 function FieldFile({ world, field, value, modify }) {
   const nRef = useRef(0)

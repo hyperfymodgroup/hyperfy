@@ -98,10 +98,7 @@ export class RigidBody extends Node {
       return
     }
     if (didMove) {
-      if (this.actor) {
-        // handled via physics system as sometimes these are ignored
-        this.ctx.world.physics.setGlobalPose(this.actor, this.matrixWorld)
-      }
+      this.actorHandle?.move(this.matrixWorld)
     }
   }
 

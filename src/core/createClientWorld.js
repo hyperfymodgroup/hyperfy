@@ -6,6 +6,7 @@ import { ClientNetwork } from './systems/ClientNetwork'
 import { ClientLoader } from './systems/ClientLoader'
 import { ClientGraphics } from './systems/ClientGraphics'
 import { ClientEnvironment } from './systems/ClientEnvironment'
+import { ClientAudio } from './systems/ClientAudio'
 import { ClientStats } from './systems/ClientStats'
 import { ClientEditor } from './systems/ClientEditor'
 import { ClientActions } from './systems/ClientActions'
@@ -19,6 +20,7 @@ export function createClientWorld() {
   world.register('loader', ClientLoader)
   world.register('graphics', ClientGraphics)
   world.register('environment', ClientEnvironment)
+  world.register('audio', ClientAudio)
   world.register('stats', ClientStats)
   world.register('editor', ClientEditor)
   world.register('actions', ClientActions)

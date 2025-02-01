@@ -133,6 +133,19 @@ export class ClientLoader extends System {
         }
       })
     }
+    if (type === 'audio') {
+      promise = new Promise(async (resolve, reject) => {
+        try {
+          const resp = await fetch(url)
+          const arrayBuffer = await resp.arrayBuffer()
+          const audioBuffer = await this.world.audio.ctx.decodeAudioData(arrayBuffer)
+          this.results.set(key, audioBuffer)
+          resolve(audioBuffer)
+        } catch (err) {
+          reject(err)
+        }
+      })
+    }
     this.promises.set(key, promise)
     return promise
   }
@@ -203,6 +216,18 @@ export class ClientLoader extends System {
           const script = this.world.scripts.evaluate(code)
           this.results.set(key, script)
           resolve(script)
+        } catch (err) {
+          reject(err)
+        }
+      })
+    }
+    if (type === 'audio') {
+      promise = new Promise(async (resolve, reject) => {
+        try {
+          const arrayBuffer = await file.arrayBuffer()
+          const audioBuffer = await this.world.audio.ctx.decodeAudioData(arrayBuffer)
+          this.results.set(key, audioBuffer)
+          resolve(audioBuffer)
         } catch (err) {
           reject(err)
         }

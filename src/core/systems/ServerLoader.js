@@ -138,6 +138,11 @@ export class ServerLoader extends System {
         }
       })
     }
+    if (type === 'audio') {
+      promise = new Promise(async (resolve, reject) => {
+        reject(null)
+      })
+    }
     this.promises.set(key, promise)
     return promise
   }
