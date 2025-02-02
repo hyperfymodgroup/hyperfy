@@ -11,6 +11,7 @@ export class BuildMode extends System {
 	constructor(world) {
 		super(world)
 		this.active = false
+		this.cameraLocked = false
 		this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
 
 		// Initialize speeds
@@ -20,18 +21,19 @@ export class BuildMode extends System {
 		// Add smooth camera rotation
 		this.targetRotation = new THREE.Euler(0, 0, 0, 'YXZ')
 		this.currentRotation = new THREE.Euler(0, 0, 0, 'YXZ')
-		this.rotationVelocity = new THREE.Vector2(0, 0)
 		this.lastMousePosition = new THREE.Vector2()
+		this.isMouseDown = false
 
-		// Store original camera position when entering build mode
+		// Store original states
 		this.originalCameraPosition = new THREE.Vector3()
 		this.originalCameraQuaternion = new THREE.Quaternion()
-
-		// Store original player velocity
 		this.originalPlayerVelocity = new THREE.Vector3()
 
 		// Bind methods
 		this.onMouseMove = this.onMouseMove.bind(this)
+		this.onMouseDown = this.onMouseDown.bind(this)
+		this.onMouseUp = this.onMouseUp.bind(this)
+		this.toggleCameraLock = this.toggleCameraLock.bind(this)
 	}
 
 	start() {
@@ -41,11 +43,12 @@ export class BuildMode extends System {
 				if (code === 'KeyB') {
 					this.toggleBuildMode()
 				}
+				if (code === 'MouseRight' && this.active) {
+					this.toggleCameraLock()
+				}
 			},
 			onScroll: () => {
 				if (!this.active) return false
-
-				// Only adjust movement speed with scroll wheel
 				const delta = this.control.scroll.delta
 				if (delta < 0) {
 					this.moveSpeed = Math.min(MAX_CAMERA_SPEED, this.moveSpeed * SPEED_ADJUST_FACTOR)
@@ -56,7 +59,6 @@ export class BuildMode extends System {
 			}
 		})
 
-		// Handle window resize
 		window.addEventListener('resize', this.onResize)
 		this.onResize()
 	}
@@ -66,18 +68,38 @@ export class BuildMode extends System {
 		this.camera.updateProjectionMatrix()
 	}
 
+	onMouseDown(event) {
+		if (!this.active || this.cameraLocked || event.button !== 0) return
+		this.isMouseDown = true
+		this.lastMousePosition.set(event.clientX, event.clientY)
+	}
+
+	onMouseUp(event) {
+		if (event.button === 0) {
+			this.isMouseDown = false
+		}
+	}
+
 	onMouseMove(event) {
-		if (!this.active) return
+		if (!this.active || this.cameraLocked || !this.isMouseDown) return
 
-		const deltaX = -event.movementX * 0.002 * this.rotateSpeed
-		const deltaY = -event.movementY * 0.002 * this.rotateSpeed
+		const deltaX = event.clientX - this.lastMousePosition.x
+		const deltaY = event.clientY - this.lastMousePosition.y
 
-		// Update target rotation
-		this.targetRotation.y += deltaX
-		this.targetRotation.x += deltaY
+		// Update target rotation with scaled deltas
+		this.targetRotation.y -= deltaX * 0.002 * this.rotateSpeed
+		this.targetRotation.x -= deltaY * 0.002 * this.rotateSpeed
 
-		// Clamp vertical rotation to prevent camera flipping
+		// Clamp vertical rotation
 		this.targetRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.targetRotation.x))
+
+		// Update last position
+		this.lastMousePosition.set(event.clientX, event.clientY)
+	}
+
+	toggleCameraLock() {
+		this.cameraLocked = !this.cameraLocked
+		document.body.style.cursor = this.cameraLocked ? 'default' : 'grab'
 	}
 
 	toggleBuildMode() {
@@ -85,11 +107,12 @@ export class BuildMode extends System {
 		const player = this.world.entities.player
 
 		if (this.active) {
-			// Add mouse move listener for camera rotation
+			// Enter build mode
 			document.addEventListener('mousemove', this.onMouseMove)
-
-			// Request pointer lock
-			document.body.requestPointerLock()
+			document.addEventListener('mousedown', this.onMouseDown)
+			document.addEventListener('mouseup', this.onMouseUp)
+			document.body.style.cursor = 'grab'
+			this.cameraLocked = false
 
 			// Store current camera state
 			this.originalCameraPosition.copy(this.world.camera.position)
@@ -153,13 +176,13 @@ export class BuildMode extends System {
 			player.update = () => { }
 
 		} else {
-			// Remove mouse move listener
+			// Exit build mode
 			document.removeEventListener('mousemove', this.onMouseMove)
-
-			// Exit pointer lock
-			if (document.pointerLockElement) {
-				document.exitPointerLock()
-			}
+			document.removeEventListener('mousedown', this.onMouseDown)
+			document.removeEventListener('mouseup', this.onMouseUp)
+			document.body.style.cursor = 'default'
+			this.cameraLocked = false
+			this.isMouseDown = false
 
 			// Return control and restore original camera
 			this.control.camera.unclaim()
@@ -198,11 +221,13 @@ export class BuildMode extends System {
 	update(delta) {
 		if (!this.active) return
 
-		// Smoothly interpolate current rotation to target rotation
-		const rotationLerp = 1 - Math.pow(0.001, delta) // Smooth interpolation factor
-		this.currentRotation.x += (this.targetRotation.x - this.currentRotation.x) * rotationLerp
-		this.currentRotation.y += (this.targetRotation.y - this.currentRotation.y) * rotationLerp
-		this.camera.quaternion.setFromEuler(this.currentRotation)
+		// Only update camera rotation if not locked
+		if (!this.cameraLocked) {
+			const rotationLerp = 1 - Math.pow(0.001, delta)
+			this.currentRotation.x += (this.targetRotation.x - this.currentRotation.x) * rotationLerp
+			this.currentRotation.y += (this.targetRotation.y - this.currentRotation.y) * rotationLerp
+			this.camera.quaternion.setFromEuler(this.currentRotation)
+		}
 
 		// Handle camera movement
 		if (this.control.buttons.KeyW) this.moveForward(this.moveSpeed * delta)
@@ -252,9 +277,9 @@ export class BuildMode extends System {
 	destroy() {
 		window.removeEventListener('resize', this.onResize)
 		document.removeEventListener('mousemove', this.onMouseMove)
-		if (document.pointerLockElement) {
-			document.exitPointerLock()
-		}
+		document.removeEventListener('mousedown', this.onMouseDown)
+		document.removeEventListener('mouseup', this.onMouseUp)
+		document.body.style.cursor = 'default'
 		if (this.active) {
 			this.toggleBuildMode()
 		}
