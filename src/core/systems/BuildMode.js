@@ -6,6 +6,9 @@ const MIN_CAMERA_SPEED = 1
 const MAX_CAMERA_SPEED = 50
 const ROTATION_SPEED = 2 // Fixed rotation speed
 const SPEED_ADJUST_FACTOR = 1.2
+const DAMPING = 0.9 // Damping factor (0 = full stop, 1 = no damping)
+const MAX_VELOCITY = 2 // Maximum velocity for any direction
+const ACCELERATION = 8 // How quickly we reach max speed
 
 export class BuildMode extends System {
 	constructor(world) {
@@ -17,6 +20,10 @@ export class BuildMode extends System {
 		// Initialize speeds
 		this.moveSpeed = 10
 		this.rotateSpeed = ROTATION_SPEED
+
+		// Add movement velocity tracking
+		this.velocity = new THREE.Vector3()
+		this.targetVelocity = new THREE.Vector3()
 
 		// Add smooth camera rotation
 		this.targetRotation = new THREE.Euler(0, 0, 0, 'YXZ')
@@ -43,8 +50,12 @@ export class BuildMode extends System {
 				if (code === 'KeyB') {
 					this.toggleBuildMode()
 				}
-				if (code === 'MouseRight' && this.active) {
-					this.toggleCameraLock()
+			},
+			onRelease: code => {
+				if (code === 'ShiftLeft' || code === 'ShiftRight') {
+					if (this.active) {
+						this.toggleCameraLock()
+					}
 				}
 			},
 			onScroll: () => {
@@ -229,50 +240,73 @@ export class BuildMode extends System {
 			this.camera.quaternion.setFromEuler(this.currentRotation)
 		}
 
-		// Handle camera movement
-		if (this.control.buttons.KeyW) this.moveForward(this.moveSpeed * delta)
-		if (this.control.buttons.KeyS) this.moveBackward(this.moveSpeed * delta)
-		if (this.control.buttons.KeyA) this.moveLeft(this.moveSpeed * delta)
-		if (this.control.buttons.KeyD) this.moveRight(this.moveSpeed * delta)
-		if (this.control.buttons.Space) this.moveUp(this.moveSpeed * delta)
-		if (this.control.buttons.KeyC) this.moveDown(this.moveSpeed * delta)
+		// Reset target velocity
+		this.targetVelocity.set(0, 0, 0)
+
+		// Calculate target velocity based on input
+		if (this.control.buttons.KeyW) this.targetVelocity.z = -1
+		if (this.control.buttons.KeyS) this.targetVelocity.z = 1
+		if (this.control.buttons.KeyA) this.targetVelocity.x = -1
+		if (this.control.buttons.KeyD) this.targetVelocity.x = 1
+		if (this.control.buttons.Space) this.targetVelocity.y = 1
+		if (this.control.buttons.KeyC) this.targetVelocity.y = -1
+
+		// Normalize target velocity if moving diagonally
+		if (this.targetVelocity.lengthSq() > 0) {
+			this.targetVelocity.normalize()
+			// Scale by move speed
+			this.targetVelocity.multiplyScalar(this.moveSpeed * MAX_VELOCITY)
+		}
+
+		// Apply acceleration and damping
+		const accelFactor = 1 - Math.pow(0.01, delta * ACCELERATION)
+		const dampingFactor = Math.pow(DAMPING, delta * 60) // Frame rate independent damping
+
+		// Interpolate current velocity towards target
+		this.velocity.lerp(this.targetVelocity, accelFactor)
+
+		// Apply damping when no input
+		if (this.targetVelocity.lengthSq() === 0) {
+			this.velocity.multiplyScalar(dampingFactor)
+		}
+
+		// Apply velocity to movement
+		if (this.velocity.lengthSq() > 0.0001) { // Only move if velocity is significant
+			// Handle forward/backward movement
+			if (this.velocity.z !== 0) {
+				const direction = new THREE.Vector3(0, 0, Math.sign(this.velocity.z))
+				direction.applyQuaternion(this.camera.quaternion)
+				direction.y = 0 // Keep horizontal movement level
+				direction.normalize()
+				this.camera.position.addScaledVector(direction, Math.abs(this.velocity.z) * delta)
+			}
+
+			// Handle left/right movement
+			if (this.velocity.x !== 0) {
+				const direction = new THREE.Vector3(Math.sign(this.velocity.x), 0, 0)
+				direction.applyQuaternion(this.camera.quaternion)
+				direction.y = 0 // Keep horizontal movement level
+				direction.normalize()
+				this.camera.position.addScaledVector(direction, Math.abs(this.velocity.x) * delta)
+			}
+
+			// Handle vertical movement
+			if (this.velocity.y !== 0) {
+				this.camera.position.y += this.velocity.y * delta
+			}
+		}
 
 		// Update the control camera
 		this.control.camera.position.copy(this.camera.position)
 		this.control.camera.quaternion.copy(this.camera.quaternion)
 	}
 
-	moveForward(distance) {
-		const direction = new THREE.Vector3(0, 0, -1)
-		direction.applyQuaternion(this.camera.quaternion)
-		this.camera.position.addScaledVector(direction, distance)
-	}
-
-	moveBackward(distance) {
-		const direction = new THREE.Vector3(0, 0, 1)
-		direction.applyQuaternion(this.camera.quaternion)
-		this.camera.position.addScaledVector(direction, distance)
-	}
-
-	moveLeft(distance) {
-		const direction = new THREE.Vector3(-1, 0, 0)
-		direction.applyQuaternion(this.camera.quaternion)
-		this.camera.position.addScaledVector(direction, distance)
-	}
-
-	moveRight(distance) {
-		const direction = new THREE.Vector3(1, 0, 0)
-		direction.applyQuaternion(this.camera.quaternion)
-		this.camera.position.addScaledVector(direction, distance)
-	}
-
-	moveUp(distance) {
-		this.camera.position.y += distance
-	}
-
-	moveDown(distance) {
-		this.camera.position.y -= distance
-	}
+	moveForward(distance) { }
+	moveBackward(distance) { }
+	moveLeft(distance) { }
+	moveRight(distance) { }
+	moveUp(distance) { }
+	moveDown(distance) { }
 
 	destroy() {
 		window.removeEventListener('resize', this.onResize)
