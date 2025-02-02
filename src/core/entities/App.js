@@ -195,7 +195,7 @@ export class App extends Entity {
           this.root.position.copy(hit.point)
         }
         // and rotate with the mouse wheel
-        this.root.rotation.y += this.control.scroll.delta * 0.1 * delta
+        this.root.rotation.y += this.control.scroll.delta * 0.01745 * delta // 0.01745 radians = 1 degree
       }
 
       // periodically send updates
