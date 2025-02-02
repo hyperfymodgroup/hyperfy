@@ -110,7 +110,7 @@ export class BuildMode extends System {
 
 	toggleCameraLock() {
 		this.cameraLocked = !this.cameraLocked
-		document.body.style.cursor = this.cameraLocked ? 'default' : 'grab'
+		document.body.style.cursor = this.cameraLocked ? 'default' : 'none'
 	}
 
 	toggleBuildMode() {
@@ -122,7 +122,7 @@ export class BuildMode extends System {
 			document.addEventListener('mousemove', this.onMouseMove)
 			document.addEventListener('mousedown', this.onMouseDown)
 			document.addEventListener('mouseup', this.onMouseUp)
-			document.body.style.cursor = 'grab'
+			document.body.style.cursor = 'none'
 			this.cameraLocked = false
 
 			// Store current camera state
