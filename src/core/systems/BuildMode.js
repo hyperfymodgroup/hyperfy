@@ -14,7 +14,6 @@ export class BuildMode extends System {
 	constructor(world) {
 		super(world)
 		this.active = false
-		this.cameraLocked = false
 		this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
 
 		// Initialize speeds
@@ -40,7 +39,6 @@ export class BuildMode extends System {
 		this.onMouseMove = this.onMouseMove.bind(this)
 		this.onMouseDown = this.onMouseDown.bind(this)
 		this.onMouseUp = this.onMouseUp.bind(this)
-		this.toggleCameraLock = this.toggleCameraLock.bind(this)
 	}
 
 	start() {
@@ -50,12 +48,13 @@ export class BuildMode extends System {
 				if (code === 'KeyB') {
 					this.toggleBuildMode()
 				}
+				if ((code === 'ShiftLeft' || code === 'ShiftRight') && this.active) {
+					document.body.style.cursor = 'none'
+				}
 			},
 			onRelease: code => {
-				if (code === 'ShiftLeft' || code === 'ShiftRight') {
-					if (this.active) {
-						this.toggleCameraLock()
-					}
+				if ((code === 'ShiftLeft' || code === 'ShiftRight') && this.active) {
+					document.body.style.cursor = 'default'
 				}
 			},
 			onScroll: () => {
@@ -80,7 +79,9 @@ export class BuildMode extends System {
 	}
 
 	onMouseDown(event) {
-		if (!this.active || this.cameraLocked || event.button !== 0) return
+		if (!this.active || event.button !== 0) return
+		if (!this.control.buttons.ShiftLeft && !this.control.buttons.ShiftRight) return
+		
 		this.isMouseDown = true
 		this.lastMousePosition.set(event.clientX, event.clientY)
 	}
@@ -92,7 +93,8 @@ export class BuildMode extends System {
 	}
 
 	onMouseMove(event) {
-		if (!this.active || this.cameraLocked || !this.isMouseDown) return
+		if (!this.active || !this.isMouseDown) return
+		if (!this.control.buttons.ShiftLeft && !this.control.buttons.ShiftRight) return
 
 		const deltaX = event.clientX - this.lastMousePosition.x
 		const deltaY = event.clientY - this.lastMousePosition.y
@@ -108,11 +110,6 @@ export class BuildMode extends System {
 		this.lastMousePosition.set(event.clientX, event.clientY)
 	}
 
-	toggleCameraLock() {
-		this.cameraLocked = !this.cameraLocked
-		document.body.style.cursor = this.cameraLocked ? 'default' : 'none'
-	}
-
 	toggleBuildMode() {
 		this.active = !this.active
 		const player = this.world.entities.player
@@ -122,8 +119,7 @@ export class BuildMode extends System {
 			document.addEventListener('mousemove', this.onMouseMove)
 			document.addEventListener('mousedown', this.onMouseDown)
 			document.addEventListener('mouseup', this.onMouseUp)
-			document.body.style.cursor = 'none'
-			this.cameraLocked = false
+			document.body.style.cursor = 'default'
 
 			// Store current camera state
 			this.originalCameraPosition.copy(this.world.camera.position)
@@ -192,7 +188,6 @@ export class BuildMode extends System {
 			document.removeEventListener('mousedown', this.onMouseDown)
 			document.removeEventListener('mouseup', this.onMouseUp)
 			document.body.style.cursor = 'default'
-			this.cameraLocked = false
 			this.isMouseDown = false
 
 			// Return control and restore original camera
@@ -232,13 +227,11 @@ export class BuildMode extends System {
 	update(delta) {
 		if (!this.active) return
 
-		// Only update camera rotation if not locked
-		if (!this.cameraLocked) {
-			const rotationLerp = 1 - Math.pow(0.001, delta)
-			this.currentRotation.x += (this.targetRotation.x - this.currentRotation.x) * rotationLerp
-			this.currentRotation.y += (this.targetRotation.y - this.currentRotation.y) * rotationLerp
-			this.camera.quaternion.setFromEuler(this.currentRotation)
-		}
+		// Update camera rotation regardless of shift state
+		const rotationLerp = 1 - Math.pow(0.001, delta)
+		this.currentRotation.x += (this.targetRotation.x - this.currentRotation.x) * rotationLerp
+		this.currentRotation.y += (this.targetRotation.y - this.currentRotation.y) * rotationLerp
+		this.camera.quaternion.setFromEuler(this.currentRotation)
 
 		// Reset target velocity
 		this.targetVelocity.set(0, 0, 0)
