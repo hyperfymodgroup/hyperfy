@@ -39,11 +39,11 @@ for (const row of entityRows) {
 }
 
 const vrms = new Set()
-const userRows = await db('users').select('vrm')
+const userRows = await db('users').select('avatar')
 for (const user of userRows) {
-  if (!user.vrm) continue
-  const vrm = user.vrm.replace('asset://', '')
-  vrms.add(vrm)
+  if (!user.avatar) continue
+  const avatar = user.avatar.replace('asset://', '')
+  vrms.add(avatar)
 }
 
 const fileAssets = new Set()
@@ -101,8 +101,8 @@ for (const blueprint of blueprints) {
     blueprintAssets.add(asset)
     // console.log(asset)
   }
-  for (const key in blueprint.config) {
-    const url = blueprint.config[key]?.url
+  for (const key in blueprint.props) {
+    const url = blueprint.props[key]?.url
     if (!url) continue
     const asset = url.replace('asset://', '')
     blueprintAssets.add(asset)

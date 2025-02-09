@@ -12,6 +12,7 @@ const names = [
   'entityModified',
   'entityEvent',
   'entityRemoved',
+  'playerTeleport',
 ]
 
 const byName = {}

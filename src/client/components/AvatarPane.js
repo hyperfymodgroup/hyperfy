@@ -3,18 +3,18 @@ import { useEffect, useRef, useState } from 'react'
 import { UserIcon, XIcon } from 'lucide-react'
 
 import { usePane } from './usePane'
-import { VRMPreview } from '../VRMPreview'
+import { AvatarPreview } from '../AvatarPreview'
 
-export function VRMPane({ world, info }) {
+export function AvatarPane({ world, info }) {
   const paneRef = useRef()
   const headRef = useRef()
   const viewportRef = useRef()
   const previewRef = useRef()
   const [stats, setStats] = useState(null)
-  usePane('vrm', paneRef, headRef)
+  usePane('avatar', paneRef, headRef)
   useEffect(() => {
     const viewport = viewportRef.current
-    const preview = new VRMPreview(world, viewport)
+    const preview = new AvatarPreview(world, viewport)
     previewRef.current = preview
     preview.load(info.file, info.url).then(stats => {
       console.log('stats', stats)
@@ -89,7 +89,7 @@ export function VRMPane({ world, info }) {
       <div className='vpane-head' ref={headRef}>
         <UserIcon size={20} />
         <div className='vpane-head-title'>Avatar</div>
-        <div className='vpane-head-close' onClick={() => world.emit('vrm', null)}>
+        <div className='vpane-head-close' onClick={() => world.emit('avatar', null)}>
           <XIcon size={20} />
         </div>
       </div>

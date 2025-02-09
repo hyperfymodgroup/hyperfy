@@ -13,6 +13,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.6.0]
+
+### Added
+- apps: audio node and audio file prop
+- core: camera adjusts to avatar height
+- apps: support mesh.material.emissiveIntensity for bloom control
+- apps: official custom props + configure and docs
+- apps: support Date.now()
+- core: support downloading apps as .hyp files
+- core: support drag and drop .hyp files
+- core: support app metadata (image, name, author, url, desc)
+- apps: new number field
+- apps: support snap points and embedded snap points in glbs
+- core: support drag and drop urls from another website (glbs, hyps etc)
+
+### Changed
+- core: reduce docker image size + provide prebuilt images
+- apps: props are now a global in scripts
+- apps: support app.create(name, props) syntax
+- core: unified node props 
+- core: upgrade to three@0.173.0
+- core: show chat message when dropping a file without permission
+- core: lock pointer when raising/lowering apps while holding shift
+- core: make default grass environment much much larger
+- core: show grab cursor while moving apps
+
+### Fixed
+- core: fix crashes caused by undefined blueprint props
+- apps: fix removing app configure not updating inspect window
+- apps: ui not updated in octree after moving
+- apps: fix crash due to props not being set up
+- core: dont show context wheel when app has no visible actions
+- core: support castShadow/receiveShadow props on imported glbs
+- core: fix avatars not unmounting correctly causing memory leak
+- core: fix big audio memory issue + firefox not working
+- 
+
+## [0.5.0]
+
+### Added
+- apps: world.getPlayer(id)
+- apps: avatar.height property
+- apps: new `nametag` node 
+- core: player nametags
+- core: app preload option + overlay
+- apps: sky node for controlling skybox image, hdr, sunDirection and sunIntensity
+- apps: rigidbody.sleeping property
+- apps: all nodes including ui now suppot onPointerEnter, onPointerLeave, onPointerDown, onPointerUp events
+- apps: player.teleport(position, rotationY)
+- core: /status endpoint
+- apps: uiimage node
+- apps: uv scrolling via mesh.material.textureX|textureY values
+- apps: emitting events to other apps via app.emit(name, data)
+- core: `/spawn set` and `/spawn clear` commands for admins to change spawn
+- core: generate player colliders on the server to track contacts/triggers
+- apps: world.getTime() returns server time, even on client
+- apps: support node.clone(recursive)
+- core: display loading overlay while preloading apps when entering world
+
+### Changed
+- core: `vrm` node refactored to `avatar` node, to match types instead of files
+- core: improved memory efficient for garbage collecting glbs
+
+### Fixed
+- core: fixed server tick rate
+- core: cache bust env.js file so browsers don't fetch stale envs
+- core: inspecting something while already inspecting properly updates pane
+- core: general ui node improvements
+- core: prevent setting player name to empty string
+- core: physics kinematic movement
+- core: trigger colliders crashing world
+- core: trimesh colliders crashing world
+- apps: scaling nodes not being tracked
+- apps: uitext.value crash when not a string
+- apps: uitext height layout incorrect for lineHeight
+- core: shadow colors and weird artifacts
+
 ## [0.4.0]
 
 ### Added
@@ -105,7 +182,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Basic project structure
 - Core functionality from original project
 
-[Unreleased]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hyperfy-xyz/hyperfy/releases/tag/v0.1.0 

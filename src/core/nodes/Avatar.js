@@ -1,32 +1,33 @@
 import { Node } from './Node'
 import * as THREE from 'three'
 
-export class VRM extends Node {
+export class Avatar extends Node {
   constructor(data = {}) {
     super(data)
-    this.name = 'vrm'
+    this.name = 'avatar'
     this.factory = data.factory
-    this.vrm = null
+    this.hooks = data.hooks
+    this.instance = null
   }
 
   mount() {
     if (this.factory) {
-      this.vrm = this.factory(this.matrixWorld, this)
-      this.ctx.world.setHot(this.vrm, true)
+      this.instance = this.factory(this.matrixWorld, this.hooks, this)
+      this.ctx.world?.setHot(this.instance, true)
     }
   }
 
   commit(didMove) {
     if (didMove) {
-      this.vrm?.move(this.matrixWorld)
+      this.instance?.move(this.matrixWorld)
     }
   }
 
   unmount() {
-    if (this.vrm) {
-      this.vrm.destroy()
-      this.vrm = null
-      this.ctx.world.setHot(this.vrm, false)
+    if (this.instance) {
+      this.ctx.world?.setHot(this.instance, false)
+      this.instance.destroy()
+      this.instance = null
     }
   }
 
@@ -55,9 +56,18 @@ export class VRM extends Node {
   //   }
   // }
 
+  get height() {
+    return this.instance?.height || null
+  }
+
+  setEmote(url) {
+    return this.instance?.setEmote(url)
+  }
+
   copy(source, recursive) {
     super.copy(source, recursive)
     this.factory = source.factory
+    this.hooks = source.hooks
     return this
   }
 
@@ -65,8 +75,11 @@ export class VRM extends Node {
     if (!this.proxy) {
       const self = this
       let proxy = {
+        get height() {
+          return self.height
+        },
         setEmote(url) {
-          return self.vrm?.setEmote(url)
+          return self.setEmote(url)
         },
       }
       proxy = Object.defineProperties(proxy, Object.getOwnPropertyDescriptors(super.getProxy())) // inherit Node properties

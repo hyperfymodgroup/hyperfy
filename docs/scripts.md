@@ -18,6 +18,8 @@ Just as websites run inside a DOM-based environment that provides browser APIs v
 
 - [app](/docs/ref/App.md)
 - [world](/docs/ref/World.md)
+- [props](/docs/ref/Props.md)
+- [fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
 - [Vector3](https://threejs.org/docs/#api/en/math/Vector3)
 - [Quaternion](https://threejs.org/docs/#api/en/math/Quaternion)
 - [Euler](https://threejs.org/docs/#api/en/math/Euler)
@@ -34,7 +36,7 @@ Some nodes can also be created and used on the fly using `app.create(nodeName)`.
 - [Group](/docs/ref/Group.md)
 - [Mesh](/docs/ref/Mesh.md)
 - [LOD](/docs/ref/LOD.md)
-- [VRM](/docs/ref/VRM.md)
+- [Avatar](/docs/ref/Avatar.md)
 - [Action](/docs/ref/Action.md)
 - [Controller](/docs/ref/Controller.md)
 - [RigidBody](/docs/ref/RigidBody.md)

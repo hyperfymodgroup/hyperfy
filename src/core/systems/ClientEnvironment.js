@@ -3,6 +3,7 @@ import * as THREE from '../extras/three'
 import { System } from './System'
 
 import { CSM } from '../libs/csm/CSM'
+import { isNumber } from 'lodash-es'
 
 const csmLevels = {
   none: {
@@ -12,7 +13,6 @@ const csmLevels = {
     lightIntensity: 3,
     // shadowBias: 0.000002,
     // shadowNormalBias: 0.001,
-    shadowIntensity: 2,
   },
   low: {
     cascades: 1,
@@ -21,7 +21,6 @@ const csmLevels = {
     lightIntensity: 1,
     shadowBias: 0.0000009,
     shadowNormalBias: 0.001,
-    shadowIntensity: 2,
   },
   med: {
     cascades: 3,
@@ -30,7 +29,6 @@ const csmLevels = {
     lightIntensity: 1,
     shadowBias: 0.000002,
     shadowNormalBias: 0.002,
-    shadowIntensity: 2,
   },
   high: {
     cascades: 3,
@@ -39,26 +37,38 @@ const csmLevels = {
     lightIntensity: 1,
     shadowBias: 0.000003,
     shadowNormalBias: 0.002,
-    shadowIntensity: 2,
   },
+}
+
+const defaults = {
+  bg: '/day2-2k.jpg',
+  hdr: '/day2.hdr',
+  sunDirection: new THREE.Vector3(-1, -2, -2).normalize(),
+  sunIntensity: 1,
 }
 
 /**
  * Environment System
  *
  * - Runs on the client
- * - Sets up the sun, shadows, fog, skybox etc
+ * - Sets up the sky, hdr, sun, shadows, fog etc
  *
  */
 export class ClientEnvironment extends System {
   constructor(world) {
     super(world)
+
+    this.skys = []
+    this.sky = null
+    this.skyN = 0
+    this.bgUrl = null
+    this.hdrUrl = null
   }
 
   async start() {
-    this.buildHDR()
     this.buildCSM()
-    this.buildFog()
+    this.updateSky()
+
     this.world.client.settings.on('change', this.onSettingsChange)
     this.world.graphics.on('resize', this.onViewportResize)
 
@@ -66,45 +76,80 @@ export class ClientEnvironment extends System {
     // but eventually you'll do this with an environment app
 
     // ground
-    const glb = await this.world.loader.load('glb', '/base-environment.glb')
+    const glb = await this.world.loader.load('model', '/base-environment.glb')
     const root = glb.toNodes()
-    root.activate({ world: this.world, physics: true })
-    // sky
-    const skyUrl = '/day2-2k.jpg'
-    this.world.loader.load('tex', skyUrl).then(texture => {
-      texture = texture.clone()
-      texture.minFilter = texture.magFilter = THREE.LinearFilter
-      texture.mapping = THREE.EquirectangularReflectionMapping
-      // texture.encoding = Encoding[this.encoding]
-      texture.colorSpace = THREE.SRGBColorSpace
+    root.activate({ world: this.world, label: 'base-environment' })
+  }
+
+  addSky(node) {
+    const handle = {
+      node,
+      destroy: () => {
+        const idx = this.skys.indexOf(handle)
+        if (idx === -1) return
+        this.skys.splice(idx, 1)
+        this.updateSky()
+      },
+    }
+    this.skys.push(handle)
+    this.updateSky()
+    return handle
+  }
+
+  async updateSky() {
+    if (!this.sky) {
       const geometry = new THREE.SphereGeometry(1000, 60, 40)
       const material = new THREE.MeshBasicMaterial({ side: THREE.BackSide })
-      const mesh = new THREE.Mesh(geometry, material)
-      mesh.geometry.computeBoundsTree()
-      mesh.material.map = texture
-      mesh.material.needsUpdate = true
-      mesh.material.fog = false
-      mesh.material.toneMapped = false
-      mesh.matrixAutoUpdate = false
-      mesh.matrixWorldAutoUpdate = false
-      this.world.stage.scene.add(mesh)
-    })
+      this.sky = new THREE.Mesh(geometry, material)
+      this.sky.geometry.computeBoundsTree()
+      this.sky.material.needsUpdate = true
+      this.sky.material.fog = false
+      this.sky.material.toneMapped = false
+      this.sky.matrixAutoUpdate = false
+      this.sky.matrixWorldAutoUpdate = false
+      this.sky.visible = false
+      this.world.stage.scene.add(this.sky)
+    }
+
+    const node = this.skys[this.skys.length - 1]?.node
+    const bgUrl = node?._bg || defaults.bg
+    const hdrUrl = node?._hdr || defaults.hdr
+    const sunDirection = node?._sunDirection || defaults.sunDirection
+    const sunIntensity = isNumber(node?._sunIntensity) ? node._sunIntensity : defaults.sunIntensity
+
+    const n = ++this.skyN
+    const bgTexture = await this.world.loader.load('texture', bgUrl)
+    const hdrTexture = await this.world.loader.load('hdr', hdrUrl)
+    if (n !== this.skyN) return
+
+    // bgTexture = bgTexture.clone()
+    bgTexture.minFilter = bgTexture.magFilter = THREE.LinearFilter
+    bgTexture.mapping = THREE.EquirectangularReflectionMapping
+    // bgTexture.encoding = Encoding[this.encoding]
+    bgTexture.colorSpace = THREE.SRGBColorSpace
+    this.sky.material.map = bgTexture
+
+    // hdrTexture.colorSpace = THREE.NoColorSpace
+    // hdrTexture.colorSpace = THREE.SRGBColorSpace
+    // hdrTexture.colorSpace = THREE.LinearSRGBColorSpace
+    hdrTexture.mapping = THREE.EquirectangularReflectionMapping
+    this.world.stage.scene.environment = hdrTexture
+
+    this.csm.lightDirection = sunDirection
+
+    for (const light of this.csm.lights) {
+      light.intensity = sunIntensity
+    }
+
+    this.sky.visible = true
   }
 
   update(delta) {
     this.csm.update()
-    // this.foo.rotation.y += 0.5 * delta
   }
 
-  async buildHDR() {
-    // const url = '/dusk3.hdr'
-    const url = '/day2.hdr'
-    const texture = await this.world.loader.load('hdr', url)
-    // texture.colorSpace = THREE.NoColorSpace
-    // texture.colorSpace = THREE.SRGBColorSpace
-    // texture.colorSpace = THREE.LinearSRGBColorSpace
-    texture.mapping = THREE.EquirectangularReflectionMapping
-    this.world.stage.scene.environment = texture
+  lateUpdate(delta) {
+    this.sky.matrixWorld.copyPosition(this.world.rig.matrixWorld)
   }
 
   buildCSM() {
@@ -122,7 +167,7 @@ export class ClientEnvironment extends System {
       shadowMapSize: 2048,
       maxFar: 100,
       lightIntensity: 1,
-      lightDirection: new THREE.Vector3(-1, -2, -2).normalize(),
+      lightDirection: new THREE.Vector3(0, -1, 0).normalize(),
       fade: true,
       parent: scene,
       camera: camera,
@@ -140,18 +185,11 @@ export class ClientEnvironment extends System {
       ...options,
       // note: you can test changes in console and then call csm.updateFrustrums() to debug
     })
-    for (const light of this.csm.lights) {
-      light.shadow.intensity = options.shadowIntensity
-    }
     if (!options.castShadow) {
       for (const light of this.csm.lights) {
         light.castShadow = false
       }
     }
-  }
-
-  buildFog() {
-    // ...
   }
 
   onSettingsChange = changes => {

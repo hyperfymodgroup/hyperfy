@@ -1,7 +1,7 @@
 import 'dotenv-flow/config'
 import fs from 'fs-extra'
 import path from 'path'
-import { fork } from 'child_process'
+import { fork, execSync } from 'child_process'
 import * as esbuild from 'esbuild'
 import { fileURLToPath } from 'url'
 
@@ -58,7 +58,7 @@ const clientHtmlDest = path.join(rootDir, 'build/public/index.html')
             // inject into html and copy over
             let htmlContent = await fs.readFile(clientHtmlSrc, 'utf-8')
             htmlContent = htmlContent.replace('{jsFile}', jsFile)
-            htmlContent = htmlContent.replace('{timestamp}', Date.now())
+            htmlContent = htmlContent.replaceAll('{buildId}', Date.now())
             await fs.writeFile(clientHtmlDest, htmlContent)
           })
         },

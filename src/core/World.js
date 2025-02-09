@@ -61,6 +61,7 @@ export class World extends EventEmitter {
     // update time, delta, frame and accumulator
     time /= 1000
     let delta = time - this.time
+    if (delta < 0) delta = 0
     if (delta > this.maxDeltaTime) {
       delta = this.maxDeltaTime
     }
@@ -174,7 +175,7 @@ export class World extends EventEmitter {
     }
   }
 
-  setupMaterial(material) {
+  setupMaterial = material => {
     this.environment?.csm.setupMaterial(material)
   }
 

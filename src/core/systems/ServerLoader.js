@@ -61,36 +61,50 @@ export class ServerLoader extends System {
       //   return texture
       // })
     }
-    if (type === 'tex') {
+    if (type === 'texture') {
       // ...
     }
-    if (type === 'glb') {
+    if (type === 'model') {
       promise = new Promise(async (resolve, reject) => {
         try {
           const buffer = await fs.readFile(url)
           const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
           this.gltfLoader.parse(arrayBuffer, '', glb => {
-            let node
-            let emote
-            glb.toNodes = () => {
-              if (!node) {
-                node = glbToNodes(glb, this.world)
-              }
-              return node.clone(true)
+            const node = glbToNodes(glb, this.world)
+            const model = {
+              toNodes() {
+                return node.clone(true)
+              },
             }
-            glb.toClip = options => {
-              if (!emote) emote = createEmoteFactory(glb, url)
-              return emote.toClip(options)
-            }
-            this.results.set(key, glb)
-            resolve(glb)
+            this.results.set(key, model)
+            resolve(model)
           })
         } catch (err) {
           reject(err)
         }
       })
     }
-    if (type === 'vrm') {
+    if (type === 'emote') {
+      promise = new Promise(async (resolve, reject) => {
+        try {
+          const buffer = await fs.readFile(url)
+          const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+          this.gltfLoader.parse(arrayBuffer, '', glb => {
+            const factory = createEmoteFactory(glb, url)
+            const emote = {
+              toClip(options) {
+                return factory.toClip(options)
+              },
+            }
+            this.results.set(key, emote)
+            resolve(emote)
+          })
+        } catch (err) {
+          reject(err)
+        }
+      })
+    }
+    if (type === 'avatar') {
       promise = new Promise(async (resolve, reject) => {
         try {
           // NOTE: we can't load vrms on the server yet but we don't need 'em anyway
@@ -98,9 +112,9 @@ export class ServerLoader extends System {
           const glb = {
             toNodes: () => {
               if (!node) {
-                node = createNode({ name: 'group' })
-                const vrm = createNode({ id: 'vrm', name: 'vrm', factory: null })
-                node.add(vrm)
+                node = createNode('group')
+                const node2 = createNode('avatar', { id: 'avatar', factory: null })
+                node.add(node2)
               }
               return node.clone(true)
             },
@@ -122,6 +136,11 @@ export class ServerLoader extends System {
         } catch (err) {
           reject(err)
         }
+      })
+    }
+    if (type === 'audio') {
+      promise = new Promise(async (resolve, reject) => {
+        reject(null)
       })
     }
     this.promises.set(key, promise)

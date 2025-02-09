@@ -1,6 +1,6 @@
 import { System } from './System'
 
-const TICK_RATE = 1 / 20
+const TICK_RATE = 1 / 30
 
 /**
  * Server System

@@ -45,11 +45,11 @@ export function ChatBox({ className, world, active, onClose, ...props }) {
       }
     }
     // otherwise post it
-    const user = world.entities.player.data.user
+    const player = world.entities.player
     const msg = {
       id: uuid(),
-      from: user.name,
-      fromId: user.id,
+      from: player.data.user.name,
+      fromId: player.data.id,
       body,
       createdAt: moment().toISOString(),
     }

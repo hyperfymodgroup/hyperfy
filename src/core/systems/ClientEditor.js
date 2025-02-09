@@ -8,6 +8,7 @@ import { ControlPriorities } from '../extras/ControlPriorities'
 import { CopyIcon, EyeIcon, HandIcon, Trash2Icon, UnlinkIcon } from 'lucide-react'
 import { cloneDeep } from 'lodash-es'
 import moment from 'moment'
+import { importApp } from '../extras/appTools'
 
 contextBreakers = ['MouseLeft', 'Escape']
 
@@ -98,10 +99,11 @@ export class ClientEditor extends System {
       const roles = this.world.entities.player.data.user.roles
       const isAdmin = hasRole(roles, 'admin')
       const isBuilder = hasRole(roles, 'builder')
+      const isPublic = entity.blueprint.public
       context.actions.push({
         label: 'Inspect',
         icon: EyeIcon,
-        visible: isAdmin || isBuilder,
+        visible: isAdmin || isBuilder || isPublic,
         disabled: false,
         onClick: () => {
           this.setContext(null)
@@ -149,9 +151,18 @@ export class ClientEditor extends System {
           const blueprint = {
             id: uuid(),
             version: 0,
+            name: entity.blueprint.name,
+            image: entity.blueprint.image,
+            author: entity.blueprint.author,
+            url: entity.blueprint.url,
+            desc: entity.blueprint.desc,
             model: entity.blueprint.model,
             script: entity.blueprint.script,
-            config: cloneDeep(entity.blueprint.config),
+            props: cloneDeep(entity.blueprint.props),
+            preload: entity.blueprint.preload,
+            public: entity.blueprint.public,
+            locked: entity.blueprint.locked,
+            frozen: entity.blueprint.frozen,
           }
           this.world.blueprints.add(blueprint, true)
           // assign new blueprint
@@ -170,7 +181,8 @@ export class ClientEditor extends System {
         },
       })
     }
-    if (context.actions.length) {
+    const hasActions = context.actions.find(action => action.visible)
+    if (hasActions) {
       this.setContext(context)
     }
   }
@@ -196,13 +208,22 @@ export class ClientEditor extends System {
     }
   }
 
-  onDrop = e => {
+  onDrop = async e => {
     e.preventDefault()
     this.dropping = false
     // ensure we have admin/builder role
     const roles = this.world.entities.player.data.user.roles
     const canDrop = hasRole(roles, 'admin', 'builder')
-    if (!canDrop) return
+    if (!canDrop) {
+      this.world.chat.add({
+        id: uuid(),
+        from: null,
+        fromId: null,
+        body: `You don't have permission to do that.`,
+        createdAt: moment().toISOString(),
+      })
+      return
+    }
     // handle drop
     let file
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
@@ -210,8 +231,16 @@ export class ClientEditor extends System {
       if (item.kind === 'file') {
         file = item.getAsFile()
       }
-      if (item.type === 'text/uri-list') {
-        // ...
+      // Handle multiple MIME types for URLs
+      if (item.type === 'text/uri-list' || item.type === 'text/plain' || item.type === 'text/html') {
+        const text = await getAsString(item)
+        // Extract URL from the text (especially important for text/html type)
+        const url = text.trim().split('\n')[0] // Take first line in case of multiple
+        if (url.startsWith('http')) { // Basic URL validation
+          const resp = await fetch(url)
+          const blob = await resp.blob()
+          file = new File([blob], new URL(url).pathname.split('/').pop(), { type: resp.headers.get('content-type') })
+        }
       }
     } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       file = e.dataTransfer.files[0]
@@ -230,15 +259,66 @@ export class ClientEditor extends System {
       return
     }
     const ext = file.name.split('.').pop().toLowerCase()
+    if (ext === 'hyp') {
+      this.addApp(file)
+    }
     if (ext === 'glb') {
-      this.addGLB(file)
+      this.addModel(file)
     }
     if (ext === 'vrm') {
-      this.addVRM(file)
+      this.addAvatar(file)
     }
   }
 
-  async addGLB(file) {
+  async addApp(file) {
+    const info = await importApp(file)
+    for (const asset of info.assets) {
+      this.world.loader.insert(asset.type, asset.url, asset.file)
+    }
+    const blueprint = {
+      id: uuid(),
+      version: 0,
+      name: info.blueprint.name,
+      image: info.blueprint.image,
+      author: info.blueprint.author,
+      url: info.blueprint.url,
+      desc: info.blueprint.desc,
+      model: info.blueprint.model,
+      script: info.blueprint.script,
+      props: info.blueprint.props,
+      preload: info.blueprint.preload,
+      public: info.blueprint.public,
+      locked: info.blueprint.locked,
+      frozen: info.blueprint.frozen,
+    }
+    this.world.blueprints.add(blueprint, true)
+    const hit = this.world.stage.raycastPointer(this.control.pointer.position)[0]
+    const position = hit ? hit.point.toArray() : [0, 0, 0]
+    const data = {
+      id: uuid(),
+      type: 'app',
+      blueprint: blueprint.id,
+      position,
+      quaternion: [0, 0, 0, 1],
+      mover: this.world.network.id,
+      uploader: this.world.network.id,
+      state: {},
+    }
+    const app = this.world.entities.add(data, true)
+    const promises = info.assets.map(asset => {
+      return this.world.network.upload(asset.file)
+    })
+    try {
+      await Promise.all(promises)
+      app.onUploaded()
+    } catch (err) {
+      console.error('failed to upload .hyp assets')
+      console.error(err)
+      app.destroy()
+    }
+  }
+
+  async addModel(file) {
     // immutable hash the file
     const hash = await hashFile(file)
     // use hash as glb filename
@@ -246,14 +326,22 @@ export class ClientEditor extends System {
     // canonical url to this file
     const url = `asset://${filename}`
     // cache file locally so this client can insta-load it
-    this.world.loader.insert('glb', url, file)
+    this.world.loader.insert('model', url, file)
     // make blueprint
     const blueprint = {
       id: uuid(),
       version: 0,
+      name: null,
+      image: null,
+      author: null,
+      url: null,
+      desc: null,
       model: url,
       script: null,
-      config: {},
+      props: {},
+      preload: false,
+      public: false,
+      locked: false,
     }
     // register blueprint
     this.world.blueprints.add(blueprint, true)
@@ -280,7 +368,7 @@ export class ClientEditor extends System {
     app.onUploaded()
   }
 
-  async addVRM(file) {
+  async addAvatar(file) {
     // immutable hash the file
     const hash = await hashFile(file)
     // use hash as vrm filename
@@ -288,21 +376,29 @@ export class ClientEditor extends System {
     // canonical url to this file
     const url = `asset://${filename}`
     // cache file locally so this client can insta-load it
-    this.world.loader.insert('vrm', url, file)
-    this.world.emit('vrm', {
+    this.world.loader.insert('avatar', url, file)
+    this.world.emit('avatar', {
       file,
       url,
       hash,
       onPlace: async () => {
         // close pane
-        this.world.emit('vrm', null)
+        this.world.emit('avatar', null)
         // make blueprint
         const blueprint = {
           id: uuid(),
           version: 0,
+          name: null,
+          image: null,
+          author: null,
+          url: null,
+          desc: null,
           model: url,
           script: null,
-          config: {},
+          props: {},
+          preload: false,
+          public: false,
+          locked: false,
         }
         // register blueprint
         this.world.blueprints.add(blueprint, true)
@@ -330,12 +426,12 @@ export class ClientEditor extends System {
       },
       onEquip: async () => {
         // close pane
-        this.world.emit('vrm', null)
+        this.world.emit('avatar', null)
         // prep new user data
         const player = this.world.entities.player
         const prevUser = player.data.user
         const newUser = cloneDeep(player.data.user)
-        newUser.vrm = url
+        newUser.avatar = url
         // update locally
         player.modify({ user: newUser })
         // upload
@@ -355,4 +451,10 @@ export class ClientEditor extends System {
       },
     })
   }
+}
+
+function getAsString(item) {
+  return new Promise(resolve => {
+    item.getAsString(resolve)
+  })
 }

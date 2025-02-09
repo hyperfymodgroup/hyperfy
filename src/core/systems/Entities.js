@@ -1,10 +1,12 @@
 import { App } from '../entities/App'
-import { Player } from '../entities/Player'
+import { PlayerLocal } from '../entities/PlayerLocal'
+import { PlayerRemote } from '../entities/PlayerRemote'
 import { System } from './System'
 
 const Types = {
   app: App,
-  player: Player,
+  playerLocal: PlayerLocal,
+  playerRemote: PlayerRemote,
 }
 
 /**
@@ -19,6 +21,7 @@ export class Entities extends System {
   constructor(world) {
     super(world)
     this.items = new Map()
+    this.players = new Map()
     this.hot = new Set()
     this.removed = []
   }
@@ -27,10 +30,22 @@ export class Entities extends System {
     return this.items.get(id)
   }
 
+  getPlayer(entityId) {
+    return this.players.get(entityId)
+  }
+
   add(data, local) {
-    const Entity = Types[data.type]
+    let Entity
+    if (data.type === 'player') {
+      Entity = Types[data.owner === this.world.network.id ? 'playerLocal' : 'playerRemote']
+    } else {
+      Entity = Types[data.type]
+    }
     const entity = new Entity(this.world, data, local)
     this.items.set(entity.data.id, entity)
+    if (data.type === 'player') {
+      this.players.set(entity.data.id, entity)
+    }
     if (data.owner === this.world.network.id) {
       this.player = entity
     }
@@ -40,6 +55,7 @@ export class Entities extends System {
   remove(id) {
     const entity = this.items.get(id)
     if (!entity) console.warn(`tried to remove entity that did not exist: ${id}`)
+    if (entity.isPlayer) this.players.delete(entity.data.id)
     entity.destroy()
     this.items.delete(id)
     this.removed.push(id)

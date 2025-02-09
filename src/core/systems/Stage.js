@@ -66,14 +66,14 @@ export class Stage extends System {
   }
 
   insert(options) {
-    if (options.instance) {
-      return this.insertInstance(options)
+    if (options.linked) {
+      return this.insertLinked(options)
     } else {
       return this.insertSingle(options)
     }
   }
 
-  insertInstance({ geometry, material, castShadow, receiveShadow, node, matrix }) {
+  insertLinked({ geometry, material, castShadow, receiveShadow, node, matrix }) {
     const id = `${geometry.uuid}/${material.uuid}/${castShadow}/${receiveShadow}`
     if (!this.models.has(id)) {
       const model = new Model(this, geometry, material, castShadow, receiveShadow)
@@ -83,8 +83,8 @@ export class Stage extends System {
   }
 
   insertSingle({ geometry, material, castShadow, receiveShadow, node, matrix }) {
-    material.shadowSide = THREE.BackSide // fix csm shadow banding
-    const mesh = new THREE.Mesh(geometry, material)
+    material = this.createMaterial({ raw: material })
+    const mesh = new THREE.Mesh(geometry, material.raw)
     mesh.castShadow = castShadow
     mesh.receiveShadow = receiveShadow
     mesh.matrixWorld.copy(matrix)
@@ -93,12 +93,14 @@ export class Stage extends System {
     const sItem = {
       matrix,
       geometry,
-      material,
+      material: material.raw,
       getEntity: () => node.ctx.entity,
+      node,
     }
     this.scene.add(mesh)
     this.octree.insert(sItem)
     return {
+      material: material.proxy,
       move: matrix => {
         mesh.matrixWorld.copy(matrix)
         this.octree.move(sItem)
@@ -113,31 +115,88 @@ export class Stage extends System {
   createMaterial(options = {}) {
     const self = this
     const material = {}
-    let internal
-    if (options.internal) {
-      internal = options.internal
+    let raw
+    if (options.raw) {
+      raw = options.raw.clone()
     } else if (options.unlit) {
-      internal = new THREE.MeshBasicMaterial({
+      raw = new THREE.MeshBasicMaterial({
         color: options.color || 'white',
       })
     } else {
-      internal = new THREE.MeshStandardMaterial({
+      raw = new THREE.MeshStandardMaterial({
         color: options.color || 'white',
         metalness: isNumber(options.metalness) ? options.metalness : 0,
         roughness: isNumber(options.roughness) ? options.roughness : 1,
       })
     }
-    this.world.setupMaterial(internal)
+    raw.shadowSide = THREE.BackSide // fix csm shadow banding
+    const textures = []
+    if (raw.map) {
+      raw.map = raw.map.clone()
+      textures.push(raw.map)
+    }
+    if (raw.emissiveMap) {
+      raw.emissiveMap = raw.emissiveMap.clone()
+      textures.push(raw.emissiveMap)
+    }
+    if (raw.normalMap) {
+      raw.normalMap = raw.normalMap.clone()
+      textures.push(raw.normalMap)
+    }
+    if (raw.bumpMap) {
+      raw.bumpMap = raw.bumpMap.clone()
+      textures.push(raw.bumpMap)
+    }
+    if (raw.roughnessMap) {
+      raw.roughnessMap = raw.roughnessMap.clone()
+      textures.push(raw.roughnessMap)
+    }
+    if (raw.metalnessMap) {
+      raw.metalnessMap = raw.metalnessMap.clone()
+      textures.push(raw.metalnessMap)
+    }
+    this.world.setupMaterial(raw)
     const proxy = {
-      id: internal.uuid,
-      clone() {
-        return self.createMaterial(options).proxy
+      get id() {
+        return raw.uuid
       },
+      get textureX() {
+        return textures[0]?.offset.x
+      },
+      set textureX(val) {
+        for (const tex of textures) {
+          tex.offset.x = val
+        }
+        raw.needsUpdate = true
+      },
+      get textureY() {
+        return textures[0]?.offset.y
+      },
+      set textureY(val) {
+        for (const tex of textures) {
+          tex.offset.y = val
+        }
+        raw.needsUpdate = true
+      },
+      get emissiveIntensity() {
+        return raw.emissiveIntensity
+      },
+      set emissiveIntensity(value) {
+        if (!isNumber(value)) {
+          throw new Error('[material] emissiveIntensity not a number')
+        }
+        raw.emissiveIntensity = value
+        raw.needsUpdate = true
+      },
+      // TODO: not yet
+      // clone() {
+      //   return self.createMaterial(options).proxy
+      // },
       get _ref() {
         if (world._allowMaterial) return material
       },
     }
-    material.internal = internal
+    material.raw = raw
     material.proxy = proxy
     return material
   }
@@ -159,6 +218,8 @@ export class Stage extends System {
 
 class Model {
   constructor(stage, geometry, material, castShadow, receiveShadow) {
+    material = stage.createMaterial({ raw: material })
+
     this.stage = stage
     this.geometry = geometry
     this.material = material
@@ -166,7 +227,6 @@ class Model {
     this.receiveShadow = receiveShadow
 
     if (!this.geometry.boundsTree) this.geometry.computeBoundsTree()
-    this.material.shadowSide = THREE.BackSide // fix csm shadow banding
 
     // this.mesh = mesh.clone()
     // this.mesh.geometry.computeBoundsTree() // three-mesh-bvh
@@ -178,7 +238,7 @@ class Model {
     // this.mesh.matrixAutoUpdate = false
     // this.mesh.matrixWorldAutoUpdate = false
 
-    this.iMesh = new THREE.InstancedMesh(this.geometry, this.material, 10)
+    this.iMesh = new THREE.InstancedMesh(this.geometry, this.material.raw, 10)
     // this.iMesh.name = this.mesh.name
     this.iMesh.castShadow = this.castShadow
     this.iMesh.receiveShadow = this.receiveShadow
@@ -203,11 +263,13 @@ class Model {
     const sItem = {
       matrix,
       geometry: this.geometry,
-      material: this.material,
+      material: this.material.raw,
       getEntity: () => this.items[item.idx]?.node.ctx.entity,
+      node,
     }
     this.stage.octree.insert(sItem)
     return {
+      material: this.material.proxy,
       move: matrix => {
         this.move(item, matrix)
         this.stage.octree.move(sItem)
