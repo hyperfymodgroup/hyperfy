@@ -214,7 +214,7 @@ export class ClientLoader extends System {
     if (type === 'avatar') {
       promise = this.gltfLoader.loadAsync(localUrl).then(glb => {
         const factory = createVRMFactory(glb, this.world.setupMaterial)
-        const node = createNode('group')
+        const node = createNode('group', { id: '$root' })
         const node2 = createNode('avatar', { id: 'avatar', factory, hooks: this.vrmHooks })
         node.add(node2)
         const avatar = {

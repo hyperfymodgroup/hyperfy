@@ -3,6 +3,9 @@ import { isBoolean, isNumber } from 'lodash-es'
 
 import { Node } from './Node'
 
+const _v1 = new THREE.Vector3()
+const _v2 = new THREE.Vector3()
+
 const defaults = {
   type: 'box',
   width: 1,
@@ -14,7 +17,7 @@ const defaults = {
   linked: true,
   castShadow: true,
   receiveShadow: true,
-  visible: true,
+  visible: true, // DEPRECATED: use Node.active
 }
 
 const types = ['box', 'sphere', 'geometry']
@@ -52,13 +55,13 @@ export class Mesh extends Node {
     this.linked = data.linked
     this.castShadow = data.castShadow
     this.receiveShadow = data.receiveShadow
-    this.visible = data.visible
+    this.visible = data.visible // DEPRECATED: use Node.active
   }
 
   mount() {
     this.needsRebuild = false
     if (!this._geometry) return
-    if (!this._visible) return
+    if (!this._visible) return // DEPRECATED: use Node.active
     let geometry
     if (this._type === 'box') {
       geometry = getBox(this._width, this._height, this._depth)
@@ -106,7 +109,7 @@ export class Mesh extends Node {
     this._linked = source._linked
     this._castShadow = source._castShadow
     this._receiveShadow = source._receiveShadow
-    this._visible = source._visible
+    this._visible = source._visible // DEPRECATED: use Node.active
     return this
   }
 
@@ -271,10 +274,12 @@ export class Mesh extends Node {
   }
 
   get visible() {
+    // DEPRECATED: use Node.active
     return this._visible
   }
 
   set visible(value = defaults.visible) {
+    // DEPRECATED: use Node.active
     if (!isBoolean(value)) {
       throw new Error('[mesh] visible not a boolean')
     }
@@ -358,9 +363,11 @@ export class Mesh extends Node {
           self.receiveShadow = value
         },
         get visible() {
+          // DEPRECATED: use Node.active
           return self.visible
         },
         set visible(value) {
+          // DEPRECATED: use Node.active
           self.visible = value
         },
       }
