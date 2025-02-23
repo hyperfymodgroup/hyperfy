@@ -140,6 +140,9 @@ export class App extends Entity {
   }
 
   unbuild() {
+    // cancel any control
+    this.control?.release()
+    this.control = null
     // deactivate local node
     this.root?.deactivate()
     // deactivate world nodes
@@ -155,9 +158,6 @@ export class App extends Entity {
     // abort fetch's etc
     this.abortController?.abort()
     this.abortController = null
-    // cancel any control
-    this.control?.release()
-    this.control = null
     // clear fields
     this.onFields?.([])
   }
