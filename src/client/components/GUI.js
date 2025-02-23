@@ -12,6 +12,7 @@ import {
   UnplugIcon,
   WifiOffIcon,
   ZapIcon,
+  FolderIcon, // Added for the new Docs button
 } from 'lucide-react'
 import moment from 'moment'
 
@@ -28,6 +29,7 @@ import { hasRole, uuid } from '../../core/utils'
 import { ControlPriorities } from '../../core/extras/ControlPriorities'
 import { AppsPane } from './AppsPane'
 import { SettingsPane } from './SettingsPane'
+import { Docspane } from './DocsPane'
 
 export function GUI({ world }) {
   const [ref, width, height] = useElemSize()
@@ -54,6 +56,8 @@ function Content({ world, width, height }) {
   const [disconnected, setDisconnected] = useState(false)
   const [settings, setSettings] = useState(false)
   const [apps, setApps] = useState(false)
+  const [docs, setDocs] = useState(false) // New state for Docs pane
+
   useEffect(() => {
     world.on('ready', setReady)
     world.on('player', setPlayer)
@@ -70,6 +74,7 @@ function Content({ world, width, height }) {
       world.off('disconnect', setDisconnected)
     }
   }, [])
+
   return (
     <div
       className='gui'
@@ -90,16 +95,18 @@ function Content({ world, width, height }) {
           player={player}
           toggleSettings={() => setSettings(!settings)}
           toggleApps={() => setApps(!apps)}
+          toggleDocs={() => setDocs(!docs)} // New toggle function for Docs pane
         />
       )}
       {settings && <SettingsPane world={world} player={player} close={() => setSettings(false)} />}
       {apps && <AppsPane world={world} close={() => setApps(false)} />}
+      {docs && <Docspane world={world} close={() => setDocs(false)} />}
       {!ready && <LoadingOverlay />}
     </div>
   )
 }
 
-function Side({ world, player, toggleSettings, toggleApps }) {
+function Side({ world, player, toggleSettings, toggleApps, toggleDocs }) { // Add toggleDocs to props
   const touch = useMemo(() => navigator.userAgent.match(/OculusBrowser|iPhone|iPad|iPod|Android/i), [])
   const inputRef = useRef()
   const [msg, setMsg] = useState('')
@@ -183,9 +190,6 @@ function Side({ world, player, toggleSettings, toggleApps }) {
         .bar-btns {
           pointer-events: auto;
           border-radius: 25px;
-          /* background: rgba(22, 22, 28, 1);
-          border: 1px solid rgba(255, 255, 255, 0.03);
-          box-shadow: rgba(0, 0, 0, 0.5) 0px 10px 30px; */
           background: rgba(22, 22, 28, 0.4);
           backdrop-filter: blur(3px);
           display: none;
@@ -216,9 +220,6 @@ function Side({ world, player, toggleSettings, toggleApps }) {
           pointer-events: auto;
           padding: 0 0 0 16px;
           border-radius: 25px;
-          /* background: rgba(22, 22, 28, 1);
-          border: 1px solid rgba(255, 255, 255, 0.03);
-          box-shadow: rgba(0, 0, 0, 0.5) 0px 10px 30px; */
           background: rgba(22, 22, 28, 0.4);
           backdrop-filter: blur(3px);
           display: none;
@@ -259,12 +260,6 @@ function Side({ world, player, toggleSettings, toggleApps }) {
               <div className='bar-btn-vr'>VR</div>
             </div>
           )}
-          {/* <div className='bar-btn' onClick={null}>
-            <MicIcon size={20} />
-          </div> */}
-          {/* <div className='bar-btn' onClick={null}>
-            <StoreIcon size={20} />
-          </div> */}
           <div className='bar-btn' onClick={toggleSettings}>
             <SettingsIcon size={20} />
           </div>
@@ -273,6 +268,9 @@ function Side({ world, player, toggleSettings, toggleApps }) {
               <ZapIcon size={20} />
             </div>
           )}
+          <div className='bar-btn' onClick={toggleDocs}> {/* New button for Docs pane */}
+            <FolderIcon size={20} />
+          </div>
         </div>
         <label className={cls('bar-chat', { active: chat })}>
           <input
