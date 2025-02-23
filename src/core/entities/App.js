@@ -1,4 +1,5 @@
-import { isArray, isFunction, isString } from 'lodash-es'
+import * as THREE from '../extras/three'
+import { isArray, isFunction, isNumber, isString } from 'lodash-es'
 import moment from 'moment'
 
 import { Entity } from './Entity'
@@ -7,6 +8,7 @@ import { LerpVector3 } from '../extras/LerpVector3'
 import { LerpQuaternion } from '../extras/LerpQuaternion'
 import { ControlPriorities } from '../extras/ControlPriorities'
 import { getRef } from '../nodes/Node'
+import { Layers } from '../extras/Layers'
 
 const hotEventNames = ['fixedUpdate', 'update', 'lateUpdate']
 const internalEvents = ['fixedUpdate', 'updated', 'lateUpdate', 'enter', 'leave', 'chat']
@@ -28,6 +30,8 @@ export class App extends Entity {
     this.worldListeners = new Map()
     this.listeners = {}
     this.eventQueue = []
+    this.snaps = []
+    this.root = createNode('group')
     this.fields = []
     this.target = null
     this.projectLimit = Infinity
@@ -136,6 +140,9 @@ export class App extends Entity {
   }
 
   unbuild() {
+    // cancel any control
+    this.control?.release()
+    this.control = null
     // deactivate local node
     this.root?.deactivate()
     // deactivate world nodes
@@ -261,6 +268,7 @@ export class App extends Entity {
     if (!this.listeners[name]) {
       this.listeners[name] = new Set()
     }
+    if (this.listeners[name].has(callback)) return
     this.listeners[name].add(callback)
     if (hotEventNames.includes(name)) {
       this.hotEvents++
@@ -270,6 +278,7 @@ export class App extends Entity {
 
   off(name, callback) {
     if (!this.listeners[name]) return
+    if (!this.listeners[name].has(callback)) return
     this.listeners[name].delete(callback)
     if (hotEventNames.includes(name)) {
       this.hotEvents--
@@ -379,9 +388,15 @@ export class App extends Entity {
         if (!node) return
         const parent = node.parent
         if (!parent) return
+        const finalMatrix = new THREE.Matrix4()
+        finalMatrix.copy(node.matrix)
+        let currentParent = node.parent
+        while (currentParent) {
+          finalMatrix.premultiply(currentParent.matrix)
+          currentParent = currentParent.parent
+        }
         parent.remove(node)
-        node.matrix.copy(node.matrixWorld)
-        node.matrix.decompose(node.position, node.quaternion, node.scale)
+        finalMatrix.decompose(node.position, node.quaternion, node.scale)
         node.activate({ world, entity })
         entity.worldNodes.add(node)
       },
@@ -413,6 +428,68 @@ export class App extends Entity {
         const player = world.entities.getPlayer(playerId || world.entities.player?.data.id)
         return player?.getProxy()
       },
+      createLayerMask(...groups) {
+        let mask = 0
+        for (const group of groups) {
+          if (!Layers[group]) throw new Error(`[createLayerMask] invalid group: ${group}`)
+          mask |= Layers[group].group
+        }
+        return mask
+      },
+      raycast(origin, direction, maxDistance, layerMask) {
+        if (!origin?.isVector3) throw new Error('[raycast] origin must be Vector3')
+        if (!direction?.isVector3) throw new Error('[raycast] direction must be Vector3')
+        if (maxDistance !== undefined && !isNumber(maxDistance)) throw new Error('[raycast] maxDistance must be number')
+        if (layerMask !== undefined && layerMask !== null && !isNumber(layerMask))
+          throw new Error('[raycast] layerMask must be number')
+        const hit = world.physics.raycast(origin, direction, maxDistance, layerMask)
+        if (!hit) return null
+        if (!this.raycastHit) {
+          this.raycastHit = {
+            point: new THREE.Vector3(),
+            normal: new THREE.Vector3(),
+            distance: 0,
+            tag: null,
+            player: null,
+          }
+        }
+        this.raycastHit.point.copy(hit.point)
+        this.raycastHit.normal.copy(hit.normal)
+        this.raycastHit.distance = hit.distance
+        this.raycastHit.tag = hit.handle?.tag
+        this.raycastHit.player = hit.handle?.player
+        return this.raycastHit
+      },
+      // applyEffect(effect) {
+      //   effect.entityId = entity.data.id
+      //   if (effect?.anchor) {
+      //     effect.anchorId = effect.anchor.anchorId
+      //     delete effect.anchor
+      //   }
+      //   if (effect?.cancellable) {
+      //     delete effect.freeze // not applicable
+      //   }
+      //   if (effect?.player) {
+      //     effect.playerNetworkId = effect.player.networkId
+      //     delete effect.player
+      //   }
+      //   // targeting local player
+      //   if (effect.playerNetworkId === world.network.id) {
+      //     world.network.enqueue('onPlayerEffect', effect)
+      //   }
+      //   // targeting remote player from a client
+      //   else if (effect.playerNetworkId && world.network.isClient) {
+      //     world.network.send('playerEffect', effect)
+      //   }
+      //   // targeting remote player from the server
+      //   else if (effect.playerNetworkId && world.network.isServer) {
+      //     world.network.sendTo(effect.playerNetworkId, 'playerEffect', effect)
+      //   }
+      //   // targeting everyone from a client -OR- the server
+      //   else {
+      //     world.network.send('playerEffect', effect)
+      //   }
+      // },
     }
   }
 
@@ -425,6 +502,9 @@ export class App extends Entity {
       },
       get version() {
         return entity.blueprint.version
+      },
+      get modelUrl() {
+        return entity.blueprint.model
       },
       get state() {
         return entity.data.state
@@ -483,7 +563,7 @@ export class App extends Entity {
         // apply any initial values
         const props = entity.blueprint.props
         for (const field of entity.fields) {
-          if (field.initial && props[field.key] === undefined) {
+          if (field.initial !== undefined && props[field.key] === undefined) {
             props[field.key] = field.initial
           }
         }

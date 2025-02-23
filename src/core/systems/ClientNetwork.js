@@ -99,6 +99,10 @@ export class ClientNetwork extends System {
     this.world.chat.add(msg, false)
   }
 
+  onChatCleared = () => {
+    this.world.chat.clear()
+  }
+
   onBlueprintAdded = blueprint => {
     this.world.blueprints.add(blueprint)
   }
@@ -128,6 +132,10 @@ export class ClientNetwork extends System {
 
   onPlayerTeleport = data => {
     this.world.entities.player?.teleport(data)
+  }
+
+  onPlayerSessionAvatar = data => {
+    this.world.entities.player?.setSessionAvatar(data.avatar)
   }
 
   onClose = code => {

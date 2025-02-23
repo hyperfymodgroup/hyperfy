@@ -89,6 +89,10 @@ export function createVRMFactory(glb, setupMaterial) {
     }
   }
 
+  // this.headToEyes = this.eyePosition.clone().sub(headPos)
+  const headPos = normBones.head.node.getWorldPosition(new THREE.Vector3())
+  const headToHeight = height - headPos.y
+
   const getBoneName = vrmBoneName => {
     return glb.userData.vrm.humanoid.getRawBoneNode(vrmBoneName)?.name
   }
@@ -201,6 +205,7 @@ export function createVRMFactory(glb, setupMaterial) {
         currentEmote.action?.fadeOut(0.15)
         currentEmote = null
       }
+      if (!url) return
       if (emotes[url]) {
         currentEmote = emotes[url]
         currentEmote.action?.reset().fadeIn(0.15).play()
@@ -243,11 +248,6 @@ export function createVRMFactory(glb, setupMaterial) {
       return bonesByName[name]
     }
 
-    const applyBoneMatrixWorld = (name, matrix) => {
-      const bone = findBone(name)
-      matrix.multiplyMatrices(vrm.scene.matrixWorld, bone.matrixWorld)
-    }
-
     let firstPersonActive = false
     const setFirstPerson = active => {
       if (firstPersonActive === active) return
@@ -256,13 +256,22 @@ export function createVRMFactory(glb, setupMaterial) {
       firstPersonActive = active
     }
 
+    const m1 = new THREE.Matrix4()
+    const getBoneTransform = boneName => {
+      const bone = findBone(boneName)
+      if (!bone) return null
+      // combine the scene's world matrix with the bone's world matrix
+      return m1.multiplyMatrices(vrm.scene.matrixWorld, bone.matrixWorld)
+    }
+
     return {
       raw: vrm,
       height,
-      applyBoneMatrixWorld,
+      headToHeight,
       setEmote,
       setFirstPerson,
       update,
+      getBoneTransform,
       move(_matrix) {
         matrix.copy(_matrix)
         hooks.octree?.move(sItem)

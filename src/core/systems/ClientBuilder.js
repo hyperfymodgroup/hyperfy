@@ -63,7 +63,7 @@ export class ClientBuilder extends System {
   }
 
   canBuild() {
-    return hasRole(this.world.entities.player?.data.user.roles, 'admin', 'builder')
+    return hasRole(this.world.entities.player?.data.roles, 'admin', 'builder')
   }
 
   updateActions() {
@@ -74,28 +74,24 @@ export class ClientBuilder extends System {
       }
     }
     if (this.enabled && !this.selected) {
-      actions.push({ type: 'tab', label: 'Exit Build Mode' })
-      actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
-      actions.push({ type: 'keyR', label: 'Inspect' })
-      actions.push({ type: 'keyU', label: 'Unlink' })
-      actions.push({ type: 'keyP', label: 'Pin' })
       actions.push({ type: 'mouseLeft', label: 'Grab' })
       actions.push({ type: 'mouseRight', label: 'Duplicate' })
+      actions.push({ type: 'keyR', label: 'Inspect' })
+      actions.push({ type: 'keyP', label: 'Pin' })
       actions.push({ type: 'keyX', label: 'Destroy' })
+      actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
+      actions.push({ type: 'tab', label: 'Exit Build Mode' })
     }
     if (this.enabled && this.selected) {
-      actions.push({ type: 'tab', label: 'Exit Build Mode' })
-      actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
-      actions.push({ type: 'keyR', label: 'Inspect' })
-      actions.push({ type: 'keyU', label: 'Unlink' })
-      actions.push({ type: 'keyP', label: 'Pin' })
       actions.push({ type: 'mouseLeft', label: 'Place' })
       actions.push({ type: 'mouseWheel', label: 'Rotate' })
       actions.push({ type: 'mouseRight', label: 'Duplicate' })
-      actions.push({ type: 'keyX', label: 'Destroy' })
-      actions.push({ type: 'controlLeft', label: 'No Snap (Hold)' })
       actions.push({ type: 'keyF', label: 'Push' })
       actions.push({ type: 'keyC', label: 'Pull' })
+      actions.push({ type: 'keyX', label: 'Destroy' })
+      actions.push({ type: 'controlLeft', label: 'No Snap (Hold)' })
+      actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
+      actions.push({ type: 'tab', label: 'Exit Build Mode' })
     }
     this.control.setActions(actions)
   }
@@ -110,7 +106,7 @@ export class ClientBuilder extends System {
       this.select(null)
     }
     // deselect if stolen
-    if (this.selected?.data.mover !== this.world.network.id) {
+    if (this.selected && this.selected?.data.mover !== this.world.network.id) {
       this.select(null)
     }
     // stop here if build mode not enabled
@@ -118,7 +114,7 @@ export class ClientBuilder extends System {
       return
     }
     // inspect
-    if (this.control.keyR.pressed) {
+    if (!this.selected && this.control.keyR.pressed) {
       const entity = this.getEntityAtReticle()
       if (entity) {
         this.select(null)
@@ -158,7 +154,7 @@ export class ClientBuilder extends System {
       }
     }
     // pin/unpin
-    if (this.control.keyP.pressed) {
+    if (!this.selected && this.control.keyP.pressed) {
       const entity = this.getEntityAtReticle()
       if (entity?.isApp) {
         entity.data.pinned = !entity.data.pinned
@@ -303,6 +299,8 @@ export class ClientBuilder extends System {
   }
 
   select(app) {
+    // do nothing if not changed
+    if (this.selected === app) return
     // deselect existing
     if (this.selected) {
       if (!this.selected.dead && this.selected.data.mover === this.world.network.id) {
@@ -338,6 +336,7 @@ export class ClientBuilder extends System {
       this.target.quaternion.copy(app.root.quaternion)
       this.target.limit = PROJECT_MAX
     }
+    // update actions
     this.updateActions()
   }
 
@@ -507,7 +506,7 @@ export class ClientBuilder extends System {
     const blueprint = {
       id: uuid(),
       version: 0,
-      name: file.name,
+      name: file.name.split('.')[0],
       image: null,
       author: null,
       url: null,
@@ -603,24 +602,22 @@ export class ClientBuilder extends System {
         this.world.emit('avatar', null)
         // prep new user data
         const player = this.world.entities.player
-        const prevUser = player.data.user
-        const newUser = cloneDeep(player.data.user)
-        newUser.avatar = url
+        const prevUrl = player.data.avatar
         // update locally
-        player.modify({ user: newUser })
+        player.modify({ avatar: url, sessionAvatar: null })
         // upload
         try {
           await this.world.network.upload(file)
         } catch (err) {
           console.error(err)
           // revert
-          player.modify({ user: prevUser })
+          player.modify({ avatar: prevUrl })
           return
         }
         // update for everyone
         this.world.network.send('entityModified', {
           id: player.data.id,
-          user: newUser,
+          avatar: url,
         })
       },
     })

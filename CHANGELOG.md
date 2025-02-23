@@ -13,6 +13,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [v0.8.1]
+
+### Fixed
+- apps: effects cancel bug
+
+## [v0.8.0]
+
+### Added
+- apps: stable effects system via control
+
+### Changed
+- core: simplified build controls and actions displayed
+- core: nametags and chat bubbles now track player head
+- core: remove glb extension from app names (via drag-n-drop)
+
+### Fixed
+- core: fix scaling things to zero causing octree issues
+- core: remove external cdn deps (they're unreliable)
+- core: preload rubik font before nametags draw
+- apps: release control when app unmounts
+- apps: prevent app pointer event errors bubbling up to engine
+
+## [0.7.1]
+
+### Fixed
+- core: fix worlds not launching on iOS/safari
+
+## [0.7.0]
+
+### Added
+- core: epic new build-mode controls
+- core: flying in build-mode
+- core: double-jump in normal-mode
+- core: initial WebXR support
+- apps: dropdown prop
+- apps: new "pin" option to prevent accidentally moving something
+- apps: support for LODs
+- apps: new "unique" toggle that creates unlinked duplicates by default
+- apps: sky node sun color property
+- core: new admin apps list to help find apps, improve performance, etc
+- core: new device setting panel to change shadows, resolution, postprocessing, volume etc
+- apps: add fog support to sky node
+- apps: add delete button to app inspect window
+- apps: world.raycast() support
+- apps: support for borderWidth and borderColor on `ui` and `uiview` nodes
+- apps: player effects (anchor, emote, snare, freeze, duration, cancellable)
+- apps: support reading player bone transforms for attachments
+- 
+
+### Changed
+- core: improved GUI, chat, actions and app inspector design
+- core: reduce z-fighting at long distance
+- core: apps drop rotated 180 degrees for consistency with 3D design tools
+- apps: set metadata name to initial glb file name
+- core: crosshair now changes color depending on its background for high visibility
+- core: improve anisotropy for viewing textures at an angle
+
+### Fixed
+- apps: download not exporting metadata image
+- docs: add missing `num` utility for generating random numbers
+- core: code pane sometimes shrinks to 1px in size
+- core: when dropping a glb, it will correctly snap to an initial 5deg rotation
+- core: subsequent model button presses not working in app inspector
+- core: fix DOM-related memory leak 
+- core: fix artifial 2s delay on file uploads
+
 ## [0.6.0]
 
 ### Added
@@ -182,7 +248,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Basic project structure
 - Core functionality from original project
 
-[Unreleased]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.7.1...v0.8.0
+[0.7.1]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/hyperfy-xyz/hyperfy/compare/v0.3.0...v0.4.0

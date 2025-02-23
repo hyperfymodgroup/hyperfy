@@ -26,6 +26,7 @@ import {
   LockKeyholeIcon,
   SparkleIcon,
   ZapIcon,
+  Trash2Icon,
 } from 'lucide-react'
 
 import { hashFile } from '../../core/utils-client'
@@ -65,7 +66,7 @@ export function AppPane({ world, app }) {
   const paneRef = useRef()
   const headRef = useRef()
   const [blueprint, setBlueprint] = useState(app.blueprint)
-  const canEdit = !blueprint.frozen && hasRole(world.entities.player.data.user.roles, 'admin', 'builder')
+  const canEdit = !blueprint.frozen && hasRole(world.entities.player.data.roles, 'admin', 'builder')
   const [tab, setTab] = useState('main')
   usePane('inspect', paneRef, headRef)
   useEffect(() => {
@@ -112,13 +113,15 @@ export function AppPane({ world, app }) {
           border-bottom: 1px solid rgba(255, 255, 255, 0.05);
           display: flex;
           align-items: center;
-          padding: 0 10px 0 10px;
+          padding: 0 10px;
           &-icon {
-            width: 30px;
+            width: 60px;
             height: 40px;
             display: flex;
             align-items: center;
-            justify-content: center;
+            svg {
+              margin-left: 10px;
+            }
           }
           &-tabs {
             flex: 1;
@@ -145,7 +148,16 @@ export function AppPane({ world, app }) {
             }
           }
 
-          &-close {
+          &-btns {
+            width: 60px;
+            display: flex;
+            align-items: center;
+            &.right {
+              justify-content: flex-end;
+            }
+          }
+
+          &-btn {
             color: #515151;
             width: 30px;
             height: 40px;
@@ -193,8 +205,21 @@ export function AppPane({ world, app }) {
             <span>Nodes</span>
           </div>
         </div>
-        <div className='apane-head-close' onClick={() => world.emit('inspect', null)}>
-          <XIcon size={20} />
+        <div className='apane-head-btns right'>
+          {canEdit && (
+            <div
+              className='apane-head-btn'
+              onClick={() => {
+                world.emit('inspect', null)
+                app.destroy(true)
+              }}
+            >
+              <Trash2Icon size={16} />
+            </div>
+          )}
+          <div className='apane-head-btn' onClick={() => world.emit('inspect', null)}>
+            <XIcon size={20} />
+          </div>
         </div>
       </div>
       {tab === 'main' && (
@@ -213,6 +238,7 @@ export function AppPane({ world, app }) {
 }
 
 function AppPaneMain({ world, app, blueprint, canEdit }) {
+  const [fileInputKey, setFileInputKey] = useState(0)
   const downloadModel = e => {
     if (e.shiftKey) {
       e.preventDefault()
@@ -222,6 +248,7 @@ function AppPaneMain({ world, app, blueprint, canEdit }) {
     }
   }
   const changeModel = async e => {
+    setFileInputKey(n => n + 1)
     const file = e.target.files[0]
     if (!file) return
     const ext = file.name.split('.').pop()
@@ -396,7 +423,7 @@ function AppPaneMain({ world, app, blueprint, canEdit }) {
           <div className='amain-line mt mb' />
           <div className='amain-btns'>
             <label className='amain-btns-btn' onClick={downloadModel}>
-              <input type='file' accept='.glb,.vrm' onChange={changeModel} />
+              <input key={fileInputKey} type='file' accept='.glb,.vrm' onChange={changeModel} />
               <BoxIcon size={16} />
               <span>Model</span>
             </label>
@@ -761,6 +788,9 @@ const fieldTypes = {
 }
 
 function Field({ world, props, field, value, modify }) {
+  if (field.hidden) {
+    return null
+  }
   if (field.when) {
     for (const rule of field.when) {
       if (rule.op === 'eq' && props[rule.key] !== rule.value) {
