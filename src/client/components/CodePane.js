@@ -98,7 +98,7 @@ export function CodePane({ entity, onClose }) {
             font-weight: 500;
             flex: 1;
           }
-          &-close {
+          &-docs {
             width: 40px;
             height: 40px;
             display: flex;
@@ -110,6 +110,17 @@ export function CodePane({ entity, onClose }) {
               color: white;
             }
           }
+          &-close {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.5);
+            &:hover {
+              cursor: pointer;
+              color: white;
+            }
         }
         .acode-content {
           flex: 1;
@@ -128,7 +139,7 @@ export function CodePane({ entity, onClose }) {
       <div className='acode-head' ref={headRef}>
         <FileCode2Icon size={16} />
         <div className='acode-head-title'>Code</div>
-        <div className="docspane" onClick={() => world.emit('docs', null)} >
+        <div className="acode-head-docs" onClick={() => world.emit('docs', null)} >
           <BookOpenText
               size={16}
             />

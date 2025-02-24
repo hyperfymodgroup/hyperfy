@@ -87,7 +87,7 @@ function Content({ world, width, height }) {
     >
       {inspect && <InspectPane key={`inspect-${inspect.data.id}`} world={world} entity={inspect} />}
       {inspect && code && <CodePane key={`code-${inspect.data.id}`} world={world} entity={inspect} />}
-      {inspect && code && docs && <Docspane key="docs" world={world} />}
+      {inspect && code && docs && <Docspane key="docs" world={world} close={() => setDocs(false)} />}
       {avatar && <AvatarPane key={avatar.hash} world={world} info={avatar} />}
       {disconnected && <Disconnected />}
       <Reticle world={world} />
