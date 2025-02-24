@@ -397,10 +397,6 @@ export class ServerNetwork extends System {
     this.sendTo(data.networkId, 'playerTeleport', data)
   }
 
-  onPlayerEffect = (socket, data) => {
-    this.sendTo(data.networkId, 'playerEffect', data.effect)
-  }
-
   onPlayerSessionAvatar = (socket, data) => {
     this.sendTo(data.networkId, 'playerSessionAvatar', data.avatar)
   }
