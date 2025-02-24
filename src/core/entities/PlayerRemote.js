@@ -3,8 +3,8 @@ import { Entity } from './Entity'
 import { createNode } from '../extras/createNode'
 import { LerpQuaternion } from '../extras/LerpQuaternion'
 import { LerpVector3 } from '../extras/LerpVector3'
-import { emotes } from '../extras/playerEmotes'
 import { createPlayerProxy } from '../extras/createPlayerProxy'
+import { Emotes } from '../extras/playerEmotes'
 
 let capsuleGeometry
 {
@@ -44,8 +44,9 @@ export class PlayerRemote extends Entity {
     // })
     // this.base.add(this.caps)
 
-    this.nametag = createNode('nametag', { label: this.data.user.name, active: false })
-    this.base.add(this.nametag)
+    this.aura = createNode('group')
+    this.nametag = createNode('nametag', { label: this.data.name, active: false })
+    this.aura.add(this.nametag)
 
     this.bubble = createNode('ui', {
       width: 300,
@@ -70,15 +71,15 @@ export class PlayerRemote extends Entity {
     })
     this.bubble.add(this.bubbleBox)
     this.bubbleBox.add(this.bubbleText)
-    this.base.add(this.bubble)
+    this.aura.add(this.bubble)
 
+    this.aura.activate({ world: this.world, entity: this })
     this.base.activate({ world: this.world, entity: this })
 
     this.applyAvatar()
 
     this.position = new LerpVector3(this.base.position, this.world.networkRate)
     this.quaternion = new LerpQuaternion(this.base.quaternion, this.world.networkRate)
-    this.emote = 'asset://emote-idle.glb'
     this.teleport = 0
 
     this.world.setHot(this, true)
@@ -86,14 +87,14 @@ export class PlayerRemote extends Entity {
   }
 
   applyAvatar() {
-    const avatarUrl = this.data.user.avatar || 'asset://avatar.vrm'
+    const avatarUrl = this.data.sessionAvatar || this.data.avatar || 'asset://avatar.vrm'
     if (this.avatarUrl === avatarUrl) return
     this.world.loader.load('avatar', avatarUrl).then(src => {
       if (this.avatar) this.avatar.deactivate()
       this.avatar = src.toNodes().get('avatar')
       this.base.add(this.avatar)
-      this.nametag.position.y = this.avatar.height + 0.2
-      this.bubble.position.y = this.avatar.height + 0.2
+      this.nametag.position.y = this.avatar.getHeadToHeight() + 0.2
+      this.bubble.position.y = this.avatar.getHeadToHeight() + 0.2
       if (!this.bubble.active) {
         this.nametag.active = true
       }
@@ -101,13 +102,39 @@ export class PlayerRemote extends Entity {
     })
   }
 
+  getAnchorMatrix() {
+    if (this.data.effect?.anchorId) {
+      return this.world.anchors.get(this.data.effect.anchorId)
+    }
+  }
+
   update(delta) {
-    this.position.update(delta)
-    this.quaternion.update(delta)
-    this.avatar?.setEmote(emotes[this.emote])
+    const anchor = this.getAnchorMatrix()
+    if (!anchor) {
+      this.position.update(delta)
+      this.quaternion.update(delta)
+    }
+    this.avatar?.setEmote(this.data.emote)
+  }
+
+  lateUpdate(delta) {
+    const anchor = this.getAnchorMatrix()
+    if (anchor) {
+      this.position.snap()
+      this.quaternion.snap()
+      this.base.position.setFromMatrixPosition(anchor)
+      this.base.quaternion.setFromRotationMatrix(anchor)
+    }
+    if (this.avatar) {
+      const matrix = this.avatar.getBoneTransform('head')
+      if (matrix) {
+        this.aura.position.setFromMatrixPosition(matrix)
+      }
+    }
   }
 
   modify(data) {
+    let avatarChanged
     if (data.hasOwnProperty('t')) {
       this.teleport++
     }
@@ -121,11 +148,26 @@ export class PlayerRemote extends Entity {
     }
     if (data.hasOwnProperty('e')) {
       this.data.emote = data.e
-      this.emote = data.e
     }
-    if (data.hasOwnProperty('user')) {
-      this.data.user = data.user
-      this.nametag.label = data.user.name
+    if (data.hasOwnProperty('ef')) {
+      this.data.effect = data.ef
+    }
+    if (data.hasOwnProperty('name')) {
+      this.data.name = data.name
+      this.nametag.label = data.name
+    }
+    if (data.hasOwnProperty('avatar')) {
+      this.data.avatar = data.avatar
+      avatarChanged = true
+    }
+    if (data.hasOwnProperty('sessionAvatar')) {
+      this.data.sessionAvatar = data.sessionAvatar
+      avatarChanged = true
+    }
+    if (data.hasOwnProperty('roles')) {
+      this.data.roles = data.roles
+    }
+    if (avatarChanged) {
       this.applyAvatar()
     }
   }
@@ -150,6 +192,8 @@ export class PlayerRemote extends Entity {
     this.avatar = null
     this.world.setHot(this, false)
     this.world.events.emit('leave', { player: this.getProxy() })
+    this.aura.deactivate()
+    this.aura = null
 
     this.world.entities.remove(this.data.id)
     // if removed locally we need to broadcast to server/clients

@@ -1,11 +1,16 @@
 import { bindRotations } from '../extras/bindRotations'
+import { buttons, codeToProp } from '../extras/buttons'
 import * as THREE from '../extras/three'
 import { System } from './System'
 
 const LMB = 1 // bitmask
 const RMB = 2 // bitmask
-const LMB_CODE = 'MouseLeft'
-const RMB_CODE = 'MouseRight'
+const MouseLeft = 'mouseLeft'
+const MouseRight = 'mouseRight'
+const HandednessLeft = 'left'
+const HandednessRight = 'right'
+
+let actionIds = 0
 
 /**
  * Control System
@@ -14,11 +19,32 @@ const RMB_CODE = 'MouseRight'
  * - provides a layered priority control system for both input and output
  *
  */
+
+const controlTypes = {
+  // key: createButton,
+  mouseLeft: createButton,
+  mouseRight: createButton,
+  touchStick: createVector,
+  scrollDelta: createValue,
+  pointer: createPointer,
+  screen: createScreen,
+  camera: createCamera,
+  xrLeftStick: createVector,
+  xrLeftBtn1: createButton,
+  xrLeftBtn2: createButton,
+  xrRightStick: createVector,
+  xrRightBtn1: createButton,
+  xrRightBtn2: createButton,
+}
+
 export class ClientControls extends System {
   constructor(world) {
     super(world)
     this.controls = []
+    this.actions = []
+    this.buttonsDown = new Set()
     this.isUserGesture = false
+    this.isMac = /Mac/.test(navigator.platform)
     this.pointer = {
       locked: false,
       shouldLock: false,
@@ -34,28 +60,97 @@ export class ClientControls extends System {
     this.scroll = {
       delta: 0,
     }
+    this.xrSession = null
+  }
+
+  start() {
+    this.world.on('xrSession', this.onXRSession)
   }
 
   preFixedUpdate() {
-    // pointer
+    // mouse wheel delta
     for (const control of this.controls) {
-      control.api.pointer.coords.copy(this.pointer.coords)
-      control.api.pointer.position.copy(this.pointer.position)
-      control.api.pointer.delta.copy(this.pointer.delta)
-      control.api.pointer.locked = this.pointer.locked
-      const consume = control.options.onPointer?.()
-      if (consume) break
+      if (control.entries.scrollDelta) {
+        control.entries.scrollDelta.value = this.scroll.delta
+        if (control.entries.scrollDelta.capture) break
+      }
     }
-    // scroll
-    for (const control of this.controls) {
-      control.api.scroll.delta = this.scroll.delta
-      const consume = control.options.onScroll?.()
-      if (consume) break
-    }
-    // screen
-    for (const control of this.controls) {
-      control.api.screen.width = this.viewport.offsetWidth
-      control.api.screen.height = this.viewport.offsetHeight
+    // xr
+    if (this.xrSession) {
+      this.xrSession.inputSources?.forEach(src => {
+        // left
+        if (src.gamepad && src.handedness === HandednessLeft) {
+          for (const control of this.controls) {
+            if (control.entries.xrLeftStick) {
+              control.entries.xrLeftStick.value.x = src.gamepad.axes[2]
+              control.entries.xrLeftStick.value.z = src.gamepad.axes[3]
+              if (control.entries.xrLeftStick.capture) break
+            }
+            if (control.entries.xrLeftBtn1) {
+              const button = control.entries.xrLeftBtn1
+              const down = src.gamepad.buttons[4].pressed
+              if (down && !button.down) {
+                button.pressed = true
+                button.onPress?.()
+              }
+              if (!down && button.down) {
+                button.released = true
+                button.onRelease?.()
+              }
+              button.down = down
+            }
+            if (control.entries.xrLeftBtn2) {
+              const button = control.entries.xrLeftBtn2
+              const down = src.gamepad.buttons[5].pressed
+              if (down && !button.down) {
+                button.pressed = true
+                button.onPress?.()
+              }
+              if (!down && button.down) {
+                button.released = true
+                button.onRelease?.()
+              }
+              button.down = down
+            }
+          }
+        }
+        // right
+        if (src.gamepad && src.handedness === HandednessRight) {
+          for (const control of this.controls) {
+            if (control.entries.xrRightStick) {
+              control.entries.xrRightStick.value.x = src.gamepad.axes[2]
+              control.entries.xrRightStick.value.z = src.gamepad.axes[3]
+              if (control.entries.xrRightStick.capture) break
+            }
+            if (control.entries.xrRightBtn1) {
+              const button = control.entries.xrRightBtn1
+              const down = src.gamepad.buttons[4].pressed
+              if (down && !button.down) {
+                button.pressed = true
+                button.onPress?.()
+              }
+              if (!down && button.down) {
+                button.released = true
+                button.onRelease?.()
+              }
+              button.down = down
+            }
+            if (control.entries.xrRightBtn2) {
+              const button = control.entries.xrRightBtn2
+              const down = src.gamepad.buttons[5].pressed
+              if (down && !button.down) {
+                button.pressed = true
+                button.onPress?.()
+              }
+              if (!down && button.down) {
+                button.released = true
+                button.onRelease?.()
+              }
+              button.down = down
+            }
+          }
+        }
+      })
     }
   }
 
@@ -64,16 +159,29 @@ export class ClientControls extends System {
     this.pointer.delta.set(0, 0, 0)
     // clear scroll delta
     this.scroll.delta = 0
+    // clear buttons
     for (const control of this.controls) {
-      // clear buttons
-      control.api.pressed = {}
-      control.api.released = {}
-      // update camera
-      if (control.api.camera.claimed) {
-        this.world.rig.position.copy(control.api.camera.position)
-        this.world.rig.quaternion.copy(control.api.camera.quaternion)
-        this.world.camera.position.z = control.api.camera.zoom
-        break
+      for (const key in control.entries) {
+        const value = control.entries[key]
+        if (value.$button) {
+          value.pressed = false
+          value.released = false
+        }
+      }
+    }
+    // update camera
+    let written
+    for (const control of this.controls) {
+      const camera = control.entries.camera
+      if (camera?.write && !written) {
+        this.world.rig.position.copy(camera.position)
+        this.world.rig.quaternion.copy(camera.quaternion)
+        this.world.camera.position.z = camera.zoom
+        written = true
+      } else if (camera) {
+        camera.position.copy(this.world.rig.position)
+        camera.quaternion.copy(this.world.rig.quaternion)
+        camera.zoom = this.world.camera.position.z
       }
     }
     // clear touch deltas
@@ -97,59 +205,85 @@ export class ClientControls extends System {
     this.viewport.addEventListener('touchcancel', this.onTouchEnd)
     this.viewport.addEventListener('pointerup', this.onPointerUp)
     this.viewport.addEventListener('wheel', this.onScroll, { passive: false }) // prettier-ignore
-    this.viewport.addEventListener('contextmenu', this.onContextMenu)
+    document.body.addEventListener('contextmenu', this.onContextMenu)
     window.addEventListener('resize', this.onResize)
     window.addEventListener('blur', this.onBlur)
   }
 
   bind(options = {}) {
+    const self = this
+    const entries = {}
     const control = {
       options,
+      entries,
+      actions: null,
+      effect: null,
       api: {
-        buttons: {},
-        pressed: {},
-        released: {},
-        pointer: {
-          coords: new THREE.Vector3(), // [0,0] to [1,1]
-          position: new THREE.Vector3(), // [0,0] to [viewportWidth,viewportHeight]
-          delta: new THREE.Vector3(), // position delta (pixels)
-          locked: false,
-          lock: () => {
-            this.lockPointer()
-          },
-          unlock: () => {
-            this.unlockPointer()
-          },
+        setActions(value) {
+          if (value !== null && !Array.isArray(value)) {
+            throw new Error('[control] actions must be null or array')
+          }
+          control.actions = value
+          if (value) {
+            for (const action of value) {
+              action.id = ++actionIds
+            }
+          }
+          self.buildActions()
         },
-        scroll: {
-          delta: 0,
+        hasEffect() {
+          const player = self.world.entities.player
+          return !!player.effect
         },
-        camera: {
-          position: new THREE.Vector3(),
-          quaternion: new THREE.Quaternion(),
-          rotation: new THREE.Euler(0, 0, 0, 'YXZ'),
-          zoom: 0,
-          claimed: false,
-          claim: () => {
-            control.api.camera.claimed = true
-          },
-          unclaim: () => {
-            control.api.camera.claimed = false
-          },
-        },
-        screen: {
-          width: 0,
-          height: 0,
+        setEffect(opts) {
+          const player = self.world.entities.player
+          // opts = { anchorId, emote, snare, freeze, turn, duration, cancellable, onEnd }
+          //
+          // cancel any current effect
+          control.effect?.onEnd()
+          control.effect = null
+          // construct effect
+          let config = null
+          let onEnd
+          if (opts) {
+            config = {}
+            if (opts.anchor) config.anchorId = opts.anchor.anchorId
+            if (opts.emote) config.emote = opts.emote
+            if (opts.snare) config.snare = opts.snare
+            if (opts.freeze) config.freeze = opts.freeze
+            if (opts.turn) config.turn = opts.turn
+            if (opts.duration) config.duration = opts.duration
+            if (opts.cancellable) {
+              config.cancellable = opts.cancellable
+              delete config.freeze // overrides
+            }
+            onEnd = opts.onEnd
+          }
+          const effect = {
+            config,
+            ended: false,
+            onEnd: () => {
+              if (effect.ended) return
+              effect.ended = true
+              control.effect = null
+              player.cancelEffect(effect.config)
+              onEnd?.()
+            },
+          }
+          // set effect on player
+          player.setEffect(effect.config, effect.onEnd)
+          control.effect = effect
         },
         release: () => {
           const idx = this.controls.indexOf(control)
           if (idx === -1) return
           this.controls.splice(idx, 1)
-          control.options.onRelease?.()
+          options.onRelease?.()
+          control.effect?.onEnd()
+          control.effect = null
         },
       },
     }
-    bindRotations(control.api.camera.quaternion, control.api.camera.rotation)
     // insert at correct priority level
     // - 0 is lowest priority generally for player controls
     // - apps use higher priority
@@ -160,29 +294,85 @@ export class ClientControls extends System {
     } else {
       this.controls.splice(idx, 0, control)
     }
-    return control.api
+    // return proxy api
+    return new Proxy(control, {
+      get(target, prop) {
+        // internal property
+        if (prop in target.api) {
+          return target.api[prop]
+        }
+        // existing item
+        if (prop in entries) {
+          return entries[prop]
+        }
+        // new button item
+        if (buttons.has(prop)) {
+          entries[prop] = createButton(self, control, prop)
+          return entries[prop]
+        }
+        // new item based on type
+        const createType = controlTypes[prop]
+        if (createType) {
+          entries[prop] = createType(self, control, prop)
+          return entries[prop]
+        }
+        return undefined
+      },
+    })
   }
 
   releaseAllButtons() {
     // release all down buttons because they can get stuck
     for (const control of this.controls) {
-      Object.keys(control.api.buttons).forEach(code => {
-        control.api.buttons[code] = false
-        control.api.released[code] = true
-        control.options.onRelease?.(code)
-      })
+      for (const key in control.entries) {
+        const value = control.entries[key]
+        if (value.$button && value.down) {
+          value.released = true
+          value.down = false
+          value.onRelease?.()
+        }
+      }
     }
   }
 
+  buildActions() {
+    this.actions = []
+    for (const control of this.controls) {
+      const actions = control.actions
+      if (actions) {
+        for (const action of actions) {
+          // ignore if existing
+          const idx = this.actions.findIndex(a => a.type === action.type)
+          if (idx !== -1) continue
+          this.actions.push(action)
+        }
+      }
+    }
+    this.world.emit('actions', this.actions)
+  }
+
   onKeyDown = e => {
+    if (e.defaultPrevented) return
     if (e.repeat) return
     if (this.isInputFocused()) return
     const code = e.code
+    if (code === 'Tab') {
+      // prevent default focus switching behavior
+      e.preventDefault()
+    }
+    const prop = codeToProp[code]
+    const text = e.key
+    this.buttonsDown.add(prop)
     for (const control of this.controls) {
-      control.api.buttons[code] = true
-      control.api.pressed[code] = true
-      const consume = control.options.onPress?.(code)
-      if (consume) break
+      const button = control.entries[prop]
+      if (button?.$button) {
+        button.pressed = true
+        button.down = true
+        button.onPress?.()
+        if (button.capture) break
+      }
+      const capture = control.onButtonPress?.(prop, text)
+      if (capture) break
     }
   }
 
@@ -195,19 +385,25 @@ export class ClientControls extends System {
       // trigger onKeyUp, so we just have to force all keys up
       return this.releaseAllButtons()
     }
+    const prop = codeToProp[code]
+    this.buttonsDown.delete(prop)
     for (const control of this.controls) {
-      control.api.buttons[code] = false
-      control.api.released[code] = true
-      const consume = control.options.onRelease?.(code)
-      if (consume) break
+      const button = control.entries[prop]
+      if (button?.$button && button.down) {
+        button.down = false
+        button.released = true
+        button.onRelease?.()
+      }
     }
   }
 
   onPointerDown = e => {
+    if (e.isGUI) return
     this.checkPointerChanges(e)
   }
 
   onPointerMove = e => {
+    if (e.isGUI) return
     this.checkPointerChanges(e)
     const rect = this.viewport.getBoundingClientRect()
     const offsetX = e.pageX - rect.left
@@ -221,6 +417,7 @@ export class ClientControls extends System {
   }
 
   onPointerUp = e => {
+    if (e.isGUI) return
     this.checkPointerChanges(e)
   }
 
@@ -229,42 +426,56 @@ export class ClientControls extends System {
     // left mouse down
     if (!this.lmbDown && lmb) {
       this.lmbDown = true
+      this.buttonsDown.add(MouseLeft)
       for (const control of this.controls) {
-        control.api.buttons[LMB_CODE] = true
-        control.api.pressed[LMB_CODE] = true
-        const consume = control.options.onPress?.(LMB_CODE)
-        if (consume) break
+        const button = control.entries.mouseLeft
+        if (button) {
+          button.down = true
+          button.pressed = true
+          button.onPress?.()
+          if (button.capture) break
+        }
       }
     }
     // left mouse up
     if (this.lmbDown && !lmb) {
       this.lmbDown = false
+      this.buttonsDown.delete(MouseLeft)
       for (const control of this.controls) {
-        control.api.buttons[LMB_CODE] = false
-        control.api.released[LMB_CODE] = true
-        const consume = control.options.onRelease?.(LMB_CODE)
-        if (consume) break
+        const button = control.entries.mouseLeft
+        if (button) {
+          button.down = false
+          button.released = true
+          button.onRelease?.()
+        }
       }
     }
     const rmb = !!(e.buttons & RMB)
     // right mouse down
     if (!this.rmbDown && rmb) {
       this.rmbDown = true
+      this.buttonsDown.add(MouseRight)
       for (const control of this.controls) {
-        control.api.buttons[RMB_CODE] = true
-        control.api.pressed[RMB_CODE] = true
-        const consume = control.options.onPress?.(RMB_CODE)
-        if (consume) break
+        const button = control.entries.mouseRight
+        if (button) {
+          button.down = true
+          button.pressed = true
+          button.onPress?.()
+          if (button.capture) break
+        }
       }
     }
     // right mouse up
     if (this.rmbDown && !rmb) {
       this.rmbDown = false
+      this.buttonsDown.delete(MouseRight)
       for (const control of this.controls) {
-        control.api.buttons[RMB_CODE] = false
-        control.api.released[RMB_CODE] = true
-        const consume = control.options.onRelease?.(RMB_CODE)
-        if (consume) break
+        const button = control.entries.mouseRight
+        if (button) {
+          button.down = false
+          button.released = true
+          button.onRelease?.()
+        }
       }
     }
   }
@@ -275,7 +486,7 @@ export class ClientControls extends System {
       await this.viewport.requestPointerLock()
       return true
     } catch (err) {
-      // console.log('pointerlock denied, too quick?')
+      console.log('pointerlock denied, too quick?')
       return false
     }
   }
@@ -299,6 +510,7 @@ export class ClientControls extends System {
   onPointerLockStart() {
     if (this.pointer.locked) return
     this.pointer.locked = true
+    this.world.emit('pointer-lock', true)
     // pointerlock is async so if its no longer meant to be locked, exit
     if (!this.pointer.shouldLock) this.unlockPointer()
   }
@@ -306,11 +518,13 @@ export class ClientControls extends System {
   onPointerLockEnd() {
     if (!this.pointer.locked) return
     this.pointer.locked = false
+    this.world.emit('pointer-lock', false)
   }
 
   onScroll = e => {
     e.preventDefault()
-    const delta = e.shiftKey ? e.deltaX : e.deltaY
+    let delta = e.shiftKey ? e.deltaX : e.deltaY
+    if (!this.isMac) delta = -delta
     this.scroll.delta += delta
   }
 
@@ -372,7 +586,95 @@ export class ClientControls extends System {
     this.releaseAllButtons()
   }
 
+  onXRSession = session => {
+    this.xrSession = session
+  }
+
   isInputFocused() {
     return document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
+  }
+}
+
+function createButton(controls, control, prop) {
+  const down = controls.buttonsDown.has(prop)
+  const pressed = down
+  const released = false
+  return {
+    $button: true,
+    down,
+    pressed,
+    released,
+    capture: false,
+    onPress: null,
+    onRelease: null,
+  }
+}
+
+function createVector(controls, control, prop) {
+  return {
+    $vector: true,
+    value: new THREE.Vector3(),
+    capture: false,
+  }
+}
+
+function createValue(controls, control, prop) {
+  return {
+    $value: true,
+    value: null,
+    capture: false,
+  }
+}
+
+function createPointer(controls, control, prop) {
+  const coords = new THREE.Vector3() // [0,0] to [1,1]
+  const position = new THREE.Vector3() // [0,0] to [viewportWidth,viewportHeight]
+  const delta = new THREE.Vector3() // position delta (pixels)
+  return {
+    get coords() {
+      return coords.copy(controls.pointer.coords)
+    },
+    get position() {
+      return position.copy(controls.pointer.position)
+    },
+    get delta() {
+      return delta.copy(controls.pointer.delta)
+    },
+    get locked() {
+      return controls.pointer.locked
+    },
+    lock() {
+      controls.lockPointer()
+    },
+    unlock() {
+      controls.unlockPointer()
+    },
+  }
+}
+
+function createScreen(controls, control) {
+  return {
+    $screen: true,
+    get width() {
+      return controls.screen.width
+    },
+    get height() {
+      return controls.screen.height
+    },
+  }
+}
+
+function createCamera(controls, control) {
+  const position = new THREE.Vector3()
+  const quaternion = new THREE.Quaternion()
+  const rotation = new THREE.Euler(0, 0, 0, 'YXZ')
+  bindRotations(quaternion, rotation)
+  return {
+    $camera: true,
+    position,
+    quaternion,
+    rotation,
+    zoom: 0,
+    write: false,
   }
 }

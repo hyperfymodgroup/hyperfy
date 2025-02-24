@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { css } from '@firebolt-dev/css'
 
 import { usePane } from './usePane'
-import { FileCode2Icon, XIcon } from 'lucide-react'
+import { FileCode2Icon, XIcon, BookOpenText } from 'lucide-react'
 import { hashFile } from '../../core/utils-client'
 
 export function CodePane({ entity, onClose }) {
@@ -88,15 +88,27 @@ export function CodePane({ entity, onClose }) {
         overflow: auto;
         flex-direction: column;
         .acode-head {
-          height: 40px;
+          height: 50px;
           border-bottom: 1px solid rgba(255, 255, 255, 0.05);
           display: flex;
           align-items: center;
-          padding: 0 0 0 10px;
+          padding: 0 10px 0 20px;
           &-title {
             padding-left: 7px;
             font-weight: 500;
             flex: 1;
+          }
+          &-docs {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.5);
+            &:hover {
+              cursor: pointer;
+              color: white;
+            }
           }
           &-close {
             width: 40px;
@@ -104,8 +116,11 @@ export function CodePane({ entity, onClose }) {
             display: flex;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
-          }
+            color: rgba(255, 255, 255, 0.5);
+            &:hover {
+              cursor: pointer;
+              color: white;
+            }
         }
         .acode-content {
           flex: 1;
@@ -118,18 +133,25 @@ export function CodePane({ entity, onClose }) {
           position: absolute;
           inset: 0;
           top: 20px;
+          height: 100%;
         }
       `}
     >
       <div className='acode-head' ref={headRef}>
         <FileCode2Icon size={16} />
         <div className='acode-head-title'>Code</div>
+        <div className="acode-head-docs" onClick={() => world.emit('docs', true)}>
+          <BookOpenText
+              size={16}
+            />
+        </div>
         <div className='acode-head-close' onClick={() => world.emit('code', null)}>
           <XIcon size={20} />
         </div>
       </div>
-      <div className='acode-content'>
-        <div className='acode-container' ref={containerRef} />
+      <div className='acode-content' style={{flex: 1, position: 'relative'}}>
+      <div className='acode-container' ref={containerRef}
+          style={{position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, height: '100%'}}/>
       </div>
     </div>
   )
