@@ -133,6 +133,7 @@ export function CodePane({ entity, onClose }) {
           position: absolute;
           inset: 0;
           top: 20px;
+          height: 100%;
         }
       `}
     >
@@ -148,8 +149,9 @@ export function CodePane({ entity, onClose }) {
           <XIcon size={20} />
         </div>
       </div>
-      <div className='acode-content'>
-        <div className='acode-container' ref={containerRef} />
+      <div className='acode-content' style={{flex: 1, position: 'relative'}}>
+      <div className='acode-container' ref={containerRef}
+          style={{position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, height: '100%'}}/>
       </div>
     </div>
   )
