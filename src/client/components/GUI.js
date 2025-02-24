@@ -260,6 +260,12 @@ function Side({ world, player, toggleSettings, toggleApps, toggleDocs }) { // Ad
               <div className='bar-btn-vr'>VR</div>
             </div>
           )}
+           {/* <div className='bar-btn' onClick={null}>
+            <MicIcon size={20} />
+          </div> */}
+          {/* <div className='bar-btn' onClick={null}>
+            <StoreIcon size={20} />
+          </div> */}
           <div className='bar-btn' onClick={toggleSettings}>
             <SettingsIcon size={20} />
           </div>
