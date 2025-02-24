@@ -56,13 +56,14 @@ function Content({ world, width, height }) {
   const [disconnected, setDisconnected] = useState(false)
   const [settings, setSettings] = useState(false)
   const [apps, setApps] = useState(false)
-  const [docs, setDocs] = useState(false) // New state for Docs pane
+  const [docs, setDocs] = useState(false)
 
   useEffect(() => {
     world.on('ready', setReady)
     world.on('player', setPlayer)
     world.on('inspect', setInspect)
     world.on('code', setCode)
+    world.on('docs', setDocs)
     world.on('avatar', setAvatar)
     world.on('disconnect', setDisconnected)
     return () => {
@@ -70,6 +71,7 @@ function Content({ world, width, height }) {
       world.off('player', setPlayer)
       world.off('inspect', setInspect)
       world.off('code', setCode)
+      world.off('docs', setDocs)
       world.off('avatar', setAvatar)
       world.off('disconnect', setDisconnected)
     }
@@ -85,6 +87,7 @@ function Content({ world, width, height }) {
     >
       {inspect && <InspectPane key={`inspect-${inspect.data.id}`} world={world} entity={inspect} />}
       {inspect && code && <CodePane key={`code-${inspect.data.id}`} world={world} entity={inspect} />}
+      {inspect && code && docs && <Docspane key="docs" world={world} />}
       {avatar && <AvatarPane key={avatar.hash} world={world} info={avatar} />}
       {disconnected && <Disconnected />}
       <Reticle world={world} />
@@ -100,7 +103,6 @@ function Content({ world, width, height }) {
       )}
       {settings && <SettingsPane world={world} player={player} close={() => setSettings(false)} />}
       {apps && <AppsPane world={world} close={() => setApps(false)} />}
-      {docs && <Docspane world={world} close={() => setDocs(false)} />}
       {!ready && <LoadingOverlay />}
     </div>
   )
@@ -274,9 +276,6 @@ function Side({ world, player, toggleSettings, toggleApps, toggleDocs }) { // Ad
               <ZapIcon size={20} />
             </div>
           )}
-          <div className='bar-btn' onClick={toggleDocs}> {/* New button for Docs pane */}
-            <FolderIcon size={20} />
-          </div>
         </div>
         <label className={cls('bar-chat', { active: chat })}>
           <input

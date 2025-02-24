@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { css } from '@firebolt-dev/css'
 
 import { usePane } from './usePane'
-import { FileCode2Icon, XIcon } from 'lucide-react'
+import { FileCode2Icon, XIcon, BookOpenText } from 'lucide-react'
 import { hashFile } from '../../core/utils-client'
 
 export function CodePane({ entity, onClose }) {
@@ -128,6 +128,11 @@ export function CodePane({ entity, onClose }) {
       <div className='acode-head' ref={headRef}>
         <FileCode2Icon size={16} />
         <div className='acode-head-title'>Code</div>
+        <div className="docspane" onClick={() => world.emit('docs', null)} >
+          <BookOpenText
+              size={16}
+            />
+        </div>
         <div className='acode-head-close' onClick={() => world.emit('code', null)}>
           <XIcon size={20} />
         </div>
