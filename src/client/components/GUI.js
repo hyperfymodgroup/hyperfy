@@ -87,7 +87,7 @@ function Content({ world, width, height }) {
     >
       {inspect && <InspectPane key={`inspect-${inspect.data.id}`} world={world} entity={inspect} />}
       {inspect && code && <CodePane key={`code-${inspect.data.id}`} world={world} entity={inspect} />}
-      {inspect && code && docs && <Docspane key="docs" world={world} close={() => setDocs(false)} />}
+      {inspect && code && docs && <Docspane key={`docs-${inspect.data.id}`} world={world} />}
       {avatar && <AvatarPane key={avatar.hash} world={world} info={avatar} />}
       {disconnected && <Disconnected />}
       <Reticle world={world} />
@@ -98,7 +98,6 @@ function Content({ world, width, height }) {
           player={player}
           toggleSettings={() => setSettings(!settings)}
           toggleApps={() => setApps(!apps)}
-          toggleDocs={() => setDocs(!docs)} // New toggle function for Docs pane
         />
       )}
       {settings && <SettingsPane world={world} player={player} close={() => setSettings(false)} />}
@@ -108,7 +107,7 @@ function Content({ world, width, height }) {
   )
 }
 
-function Side({ world, player, toggleSettings, toggleApps, toggleDocs }) { // Add toggleDocs to props
+function Side({ world, player, toggleSettings, toggleApps }) {
   const touch = useMemo(() => navigator.userAgent.match(/OculusBrowser|iPhone|iPad|iPod|Android/i), [])
   const inputRef = useRef()
   const [msg, setMsg] = useState('')

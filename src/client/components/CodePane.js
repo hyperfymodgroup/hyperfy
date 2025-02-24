@@ -139,7 +139,7 @@ export function CodePane({ entity, onClose }) {
       <div className='acode-head' ref={headRef}>
         <FileCode2Icon size={16} />
         <div className='acode-head-title'>Code</div>
-        <div className="acode-head-docs" onClick={() => world.emit('docs', null)} >
+        <div className="acode-head-docs" onClick={() => world.emit('docs', true)}>
           <BookOpenText
               size={16}
             />

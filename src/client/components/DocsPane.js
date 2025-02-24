@@ -91,7 +91,7 @@ export function Docspane({ close }) {
         <div className='docspane-head-btn' onClick={() => setRefresh(n => n + 1)}>
           <RotateCcwIcon size={16} />
         </div>
-        <div className='docspane-head-btn' onClick={close}>
+        <div className='docspane-head-btn' onClick={() => world.emit('docs', null)}>
           <XIcon size={20} />
         </div>
       </div>
