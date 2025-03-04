@@ -335,6 +335,7 @@ export class App extends Entity {
         json: async () => await resp.json(),
         text: async () => await resp.text(),
         blob: async () => await resp.blob(),
+        arrayBuffer: async () => await resp.arrayBuffer(),
       }
       return secureResp
     } catch (err) {
@@ -427,6 +428,14 @@ export class App extends Entity {
       getPlayer(playerId) {
         const player = world.entities.getPlayer(playerId || world.entities.player?.data.id)
         return player?.getProxy()
+      },
+      getPlayers() {
+        // tip: probably dont wanna call this every frame
+        const players = []
+        world.entities.players.forEach(player => {
+          players.push(player.getProxy())
+        })
+        return players
       },
       createLayerMask(...groups) {
         let mask = 0
@@ -542,6 +551,7 @@ export class App extends Entity {
         return node.getProxy()
       },
       control(options) {
+        entity.control?.release()
         // TODO: only allow on user interaction
         // TODO: show UI with a button to release()
         entity.control = world.controls.bind({
