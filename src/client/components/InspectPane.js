@@ -91,6 +91,12 @@ export function AppPane({ world, app }) {
     }
   }
 
+  // Close handler
+  const handleClose = () => {
+    world.emit('inspect-close')
+    world.emit('inspect', null)
+  }
+
   return (
     <div
       ref={paneRef}
@@ -210,14 +216,14 @@ export function AppPane({ world, app }) {
             <div
               className='apane-head-btn'
               onClick={() => {
-                world.emit('inspect', null)
+                handleClose()
                 app.destroy(true)
               }}
             >
               <Trash2Icon size={16} />
             </div>
           )}
-          <div className='apane-head-btn' onClick={() => world.emit('inspect', null)}>
+          <div className='apane-head-btn' onClick={handleClose}>
             <XIcon size={20} />
           </div>
         </div>
@@ -232,7 +238,7 @@ export function AppPane({ world, app }) {
         </>
       )}
       {tab === 'meta' && <AppPaneMeta world={world} app={app} blueprint={blueprint} />}
-      {tab === 'nodes' && <AppPaneNodes app={app} />}
+      {tab === 'nodes' && <AppPaneNodes app={app} world={world} />}
     </div>
   )
 }
@@ -529,9 +535,19 @@ function AppPaneMeta({ world, app, blueprint }) {
   )
 }
 
-function AppPaneNodes({ app }) {
+function AppPaneNodes({ app, world }) {
   const [selectedNode, setSelectedNode] = useState(null)
   const rootNode = useMemo(() => app.getNodes(), [])
+  const [updateCounter, setUpdateCounter] = useState(0)
+
+  // Set up auto-refresh for the node data
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setUpdateCounter(prev => prev + 1);
+    }, 1000); // Refresh every second
+    
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     if (rootNode && !selectedNode) {
@@ -545,12 +561,70 @@ function AppPaneNodes({ app }) {
     return `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`
   }
 
+  // Helper function to get vector components for editable fields
+  const getVectorComponents = vec => {
+    if (!vec || typeof vec.x !== 'number') return { x: 0, y: 0, z: 0 }
+    return { 
+      x: parseFloat(vec.x.toFixed(3)), 
+      y: parseFloat(vec.y.toFixed(3)), 
+      z: parseFloat(vec.z.toFixed(3))
+    }
+  }
+
   // Helper function to safely check if a property exists
   const hasProperty = (obj, prop) => {
     try {
       return obj && typeof obj[prop] !== 'undefined'
     } catch (err) {
       return false
+    }
+  }
+
+  // Function to update node properties
+  const updateNodeProperty = (property, component, value) => {
+    if (!selectedNode || !hasProperty(selectedNode, property)) return
+    
+    // Safely update the property
+    try {
+      // Convert string input to number
+      const numValue = parseFloat(value)
+      if (isNaN(numValue)) return
+
+      // Update the component (x, y, or z)
+      selectedNode[property][component] = numValue
+      
+      // For nodes with matrix updates
+      if (typeof selectedNode.clean === 'function') {
+        selectedNode.clean()
+      }
+      
+      // Trigger a re-render
+      setUpdateCounter(prev => prev + 1)
+      
+      // If this is an app's root node, update app entity position in network
+      if (app.root === selectedNode) {
+        const updateData = {
+          id: app.data.id
+        };
+        
+        if (property === 'position') {
+          updateData.position = selectedNode.position.toArray();
+        } else if (property === 'rotation') {
+          updateData.quaternion = selectedNode.quaternion.toArray();
+        } else if (property === 'scale') {
+          updateData.scale = selectedNode.scale.toArray();
+        }
+        
+        // Send update to network
+        world.network.send('entityModified', updateData);
+        
+        // Update gizmo position if available
+        if (world.builder && world.builder.updateHighlight) {
+          world.builder.updateHighlight();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update property:', err)
     }
   }
 
@@ -613,7 +687,7 @@ function AppPaneNodes({ app }) {
         }
         .anodes-detail {
           display: flex;
-          margin-bottom: 8px;
+          margin-bottom: 12px;
           font-size: 14px;
           &-label {
             width: 100px;
@@ -626,6 +700,75 @@ function AppPaneNodes({ app }) {
             &.copy {
               cursor: pointer;
             }
+          }
+          &-inputs {
+            display: flex;
+            flex: 1;
+            gap: 5px;
+          }
+          &-input-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+          }
+          &-input {
+            flex: 1;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            border-radius: 4px;
+            padding: 3px 18px;
+            font-size: 13px;
+            text-align: center;
+            font-family: monospace;
+            &:focus {
+              outline: none;
+              border-color: #00a7ff;
+              background: rgba(0, 167, 255, 0.1);
+            }
+            &.x {
+              border-top: 2px solid #ff4d4d;
+            }
+            &.y {
+              border-top: 2px solid #4dff4d;
+            }
+            &.z {
+              border-top: 2px solid #4d4dff;
+            }
+          }
+          &-btn {
+            position: absolute;
+            width: 18px;
+            height: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            &:hover {
+              color: white;
+              background: rgba(255, 255, 255, 0.1);
+            }
+            &.up {
+              top: 0;
+              right: 0;
+              border-top-right-radius: 4px;
+            }
+            &.down {
+              bottom: 0;
+              right: 0;
+              border-bottom-right-radius: 4px;
+            }
+          }
+          &-component-label {
+            margin-top: 2px;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
           }
         }
       `}
@@ -646,19 +789,32 @@ function AppPaneNodes({ app }) {
           <HierarchyDetail label='ID' value={selectedNode.id} copy />
           <HierarchyDetail label='Name' value={selectedNode.name} />
 
-          {/* Position */}
-          {hasProperty(selectedNode, 'position') && getVectorString(selectedNode.position) && (
-            <HierarchyDetail label='Position' value={getVectorString(selectedNode.position)} />
+          {/* Position - Editable */}
+          {hasProperty(selectedNode, 'position') && (
+            <HierarchyDetailVector 
+              label='Position' 
+              vector={getVectorComponents(selectedNode.position)} 
+              onChange={(component, value) => updateNodeProperty('position', component, value)}
+            />
           )}
 
-          {/* Rotation */}
-          {hasProperty(selectedNode, 'rotation') && getVectorString(selectedNode.rotation) && (
-            <HierarchyDetail label='Rotation' value={getVectorString(selectedNode.rotation)} />
+          {/* Rotation - Editable */}
+          {hasProperty(selectedNode, 'rotation') && (
+            <HierarchyDetailVector 
+              label='Rotation' 
+              vector={getVectorComponents(selectedNode.rotation)} 
+              onChange={(component, value) => updateNodeProperty('rotation', component, value)}
+              isDegrees={true}
+            />
           )}
 
-          {/* Scale */}
-          {hasProperty(selectedNode, 'scale') && getVectorString(selectedNode.scale) && (
-            <HierarchyDetail label='Scale' value={getVectorString(selectedNode.scale)} />
+          {/* Scale - Editable */}
+          {hasProperty(selectedNode, 'scale') && (
+            <HierarchyDetailVector 
+              label='Scale' 
+              vector={getVectorComponents(selectedNode.scale)} 
+              onChange={(component, value) => updateNodeProperty('scale', component, value)}
+            />
           )}
 
           {/* Material */}
@@ -695,6 +851,142 @@ function HierarchyDetail({ label, value, copy }) {
       <div className='anodes-detail-label'>{label}</div>
       <div className={cls('anodes-detail-value', { copy })} onClick={handleCopy}>
         {value}
+      </div>
+    </div>
+  )
+}
+
+function HierarchyDetailVector({ label, vector, onChange, isDegrees = false }) {
+  // Store local state to avoid flickering during edits
+  const [localValues, setLocalValues] = useState({
+    x: isDegrees ? (vector.x * 180 / Math.PI).toFixed(1) : vector.x.toFixed(3),
+    y: isDegrees ? (vector.y * 180 / Math.PI).toFixed(1) : vector.y.toFixed(3),
+    z: isDegrees ? (vector.z * 180 / Math.PI).toFixed(1) : vector.z.toFixed(3)
+  });
+  
+  // Update local values when the vector changes (from external sources)
+  useEffect(() => {
+    setLocalValues({
+      x: isDegrees ? (vector.x * 180 / Math.PI).toFixed(1) : vector.x.toFixed(3),
+      y: isDegrees ? (vector.y * 180 / Math.PI).toFixed(1) : vector.y.toFixed(3),
+      z: isDegrees ? (vector.z * 180 / Math.PI).toFixed(1) : vector.z.toFixed(3)
+    });
+  }, [vector, isDegrees]);
+
+  const handleInputChange = (component, value) => {
+    // Update local input state immediately for responsive UI
+    setLocalValues(prev => ({
+      ...prev,
+      [component]: value
+    }));
+  };
+
+  const handleBlur = (component, value) => {
+    // Parse as number
+    let numValue = parseFloat(value);
+    
+    // Validate
+    if (isNaN(numValue)) {
+      // Reset to original value if invalid
+      setLocalValues(prev => ({
+        ...prev,
+        [component]: isDegrees 
+          ? (vector[component] * 180 / Math.PI).toFixed(1) 
+          : vector[component].toFixed(3)
+      }));
+      return;
+    }
+    
+    // Snap rotation values to nearest 5 degrees
+    if (isDegrees) {
+      numValue = Math.round(numValue / 5) * 5;
+      setLocalValues(prev => ({
+        ...prev,
+        [component]: numValue.toFixed(1)
+      }));
+      
+      // Convert to radians for the actual change
+      numValue = numValue * Math.PI / 180;
+    }
+    
+    // Commit the change
+    onChange(component, numValue);
+  };
+
+  const handleKeyDown = (e, component, value) => {
+    if (e.key === 'Enter') {
+      e.target.blur(); // Trigger blur to apply the value
+    }
+  };
+  
+  const handleIncrement = (component, amount) => {
+    const currentValue = parseFloat(localValues[component]);
+    if (isNaN(currentValue)) return;
+    
+    // Calculate the increment amount based on the type of value
+    const increment = isDegrees ? 5 : (label === 'Scale' ? 0.1 : 0.25);
+    const newValue = (currentValue + (increment * amount)).toFixed(isDegrees ? 1 : 3);
+    
+    // Update the local UI immediately
+    setLocalValues(prev => ({
+      ...prev,
+      [component]: newValue
+    }));
+    
+    // Apply the value
+    let finalValue = parseFloat(newValue);
+    if (isDegrees) {
+      finalValue = finalValue * Math.PI / 180;
+    }
+    
+    onChange(component, finalValue);
+  };
+
+  return (
+    <div className='anodes-detail'>
+      <div className='anodes-detail-label'>{label}</div>
+      <div className='anodes-detail-inputs'>
+        <div className='anodes-detail-input-group'>
+          <input 
+            type="text" 
+            className="anodes-detail-input x" 
+            value={localValues.x} 
+            onChange={(e) => handleInputChange('x', e.target.value)}
+            onBlur={(e) => handleBlur('x', e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, 'x', e.target.value)}
+          />
+          <div className="anodes-detail-btn up" onClick={() => handleIncrement('x', 1)}>+</div>
+          <div className="anodes-detail-btn down" onClick={() => handleIncrement('x', -1)}>-</div>
+          <div className="anodes-detail-component-label">X</div>
+        </div>
+        
+        <div className='anodes-detail-input-group'>
+          <input 
+            type="text" 
+            className="anodes-detail-input y" 
+            value={localValues.y} 
+            onChange={(e) => handleInputChange('y', e.target.value)}
+            onBlur={(e) => handleBlur('y', e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, 'y', e.target.value)}
+          />
+          <div className="anodes-detail-btn up" onClick={() => handleIncrement('y', 1)}>+</div>
+          <div className="anodes-detail-btn down" onClick={() => handleIncrement('y', -1)}>-</div>
+          <div className="anodes-detail-component-label">Y</div>
+        </div>
+        
+        <div className='anodes-detail-input-group'>
+          <input 
+            type="text" 
+            className="anodes-detail-input z" 
+            value={localValues.z} 
+            onChange={(e) => handleInputChange('z', e.target.value)}
+            onBlur={(e) => handleBlur('z', e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, 'z', e.target.value)}
+          />
+          <div className="anodes-detail-btn up" onClick={() => handleIncrement('z', 1)}>+</div>
+          <div className="anodes-detail-btn down" onClick={() => handleIncrement('z', -1)}>-</div>
+          <div className="anodes-detail-component-label">Z</div>
+        </div>
       </div>
     </div>
   )

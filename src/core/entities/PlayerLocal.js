@@ -817,8 +817,8 @@ export class PlayerLocal extends Entity {
       this.lastSendAt = 0
     }
 
-    // left-click lock pointer
-    if (!this.control.pointer.locked && this.control.mouseLeft.pressed) {
+    // left-click lock pointer (only if not in build mode)
+    if (!this.control.pointer.locked && this.control.mouseLeft.pressed && !this.world.builder.enabled) {
       this.control.pointer.lock()
     }
 

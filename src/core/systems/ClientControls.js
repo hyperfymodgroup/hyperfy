@@ -5,8 +5,10 @@ import { System } from './System'
 
 const LMB = 1 // bitmask
 const RMB = 2 // bitmask
+const MMB = 4 // bitmask - middle mouse button
 const MouseLeft = 'mouseLeft'
 const MouseRight = 'mouseRight'
+const MouseMiddle = 'mouseMiddle'
 const HandednessLeft = 'left'
 const HandednessRight = 'right'
 
@@ -24,6 +26,7 @@ const controlTypes = {
   // key: createButton,
   mouseLeft: createButton,
   mouseRight: createButton,
+  mouseMiddle: createButton,
   touchStick: createVector,
   scrollDelta: createValue,
   pointer: createPointer,
@@ -61,6 +64,8 @@ export class ClientControls extends System {
       delta: 0,
     }
     this.xrSession = null
+    this.mmbDown = false
+    this.middleMouseLocked = false
   }
 
   start() {
@@ -199,6 +204,7 @@ export class ClientControls extends System {
     document.addEventListener('pointerlockchange', this.onPointerLockChange)
     this.viewport.addEventListener('pointerdown', this.onPointerDown)
     window.addEventListener('pointermove', this.onPointerMove)
+    window.addEventListener('pointerup', this.onWindowPointerUp)
     this.viewport.addEventListener('touchstart', this.onTouchStart)
     this.viewport.addEventListener('touchmove', this.onTouchMove)
     this.viewport.addEventListener('touchend', this.onTouchEnd)
@@ -366,8 +372,12 @@ export class ClientControls extends System {
     this.pointer.coords.y = Math.max(0, Math.min(1, offsetY / rect.height)) // prettier-ignore
     this.pointer.position.x = offsetX
     this.pointer.position.y = offsetY
-    this.pointer.delta.x += e.movementX
-    this.pointer.delta.y += e.movementY
+    
+    // Only apply camera movement if middle mouse is down or pointer is locked
+    if (this.mmbDown || this.pointer.locked) {
+      this.pointer.delta.x += e.movementX
+      this.pointer.delta.y += e.movementY
+    }
   }
 
   onPointerUp = e => {
@@ -404,6 +414,7 @@ export class ClientControls extends System {
         }
       }
     }
+    
     const rmb = !!(e.buttons & RMB)
     // right mouse down
     if (!this.rmbDown && rmb) {
@@ -425,6 +436,50 @@ export class ClientControls extends System {
       this.buttonsDown.delete(MouseRight)
       for (const control of this.controls) {
         const button = control.entries.mouseRight
+        if (button) {
+          button.down = false
+          button.released = true
+          button.onRelease?.()
+        }
+      }
+    }
+    
+    // Add middle mouse button support
+    const mmb = !!(e.buttons & MMB)
+    // middle mouse down
+    if (!this.mmbDown && mmb) {
+      this.mmbDown = true
+      this.buttonsDown.add(MouseMiddle)
+      
+      // If in build mode, lock the pointer when middle mouse is pressed
+      if (this.world.builder?.enabled && !this.pointer.locked) {
+        this.lockPointer()
+        this.middleMouseLocked = true
+      }
+      
+      for (const control of this.controls) {
+        const button = control.entries.mouseMiddle
+        if (button) {
+          button.down = true
+          button.pressed = true
+          button.onPress?.()
+          if (button.capture) break
+        }
+      }
+    }
+    // middle mouse up
+    if (this.mmbDown && !mmb) {
+      this.mmbDown = false
+      this.buttonsDown.delete(MouseMiddle)
+      
+      // If in build mode and we locked with middle mouse button, unlock
+      if (this.middleMouseLocked) {
+        this.unlockPointer()
+        this.middleMouseLocked = false
+      }
+      
+      for (const control of this.controls) {
+        const button = control.entries.mouseMiddle
         if (button) {
           button.down = false
           button.released = true
@@ -547,6 +602,47 @@ export class ClientControls extends System {
 
   isInputFocused() {
     return document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
+  }
+
+  onWindowPointerUp = e => {
+    // Check if middle mouse button was released
+    if (this.mmbDown && !(e.buttons & MMB)) {
+      this.mmbDown = false
+      this.buttonsDown.delete(MouseMiddle)
+      
+      // If in build mode and we locked with middle mouse button, unlock
+      if (this.middleMouseLocked) {
+        this.unlockPointer()
+        this.middleMouseLocked = false
+      }
+      
+      for (const control of this.controls) {
+        const button = control.entries.mouseMiddle
+        if (button) {
+          button.down = false
+          button.released = true
+          button.onRelease?.()
+        }
+      }
+    }
+  }
+
+  destroy() {
+    window.removeEventListener('keydown', this.onKeyDown)
+    window.removeEventListener('keyup', this.onKeyUp)
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange)
+    this.viewport.removeEventListener('pointerdown', this.onPointerDown)
+    window.removeEventListener('pointermove', this.onPointerMove)
+    window.removeEventListener('pointerup', this.onWindowPointerUp)
+    this.viewport.removeEventListener('touchstart', this.onTouchStart)
+    this.viewport.removeEventListener('touchmove', this.onTouchMove)
+    this.viewport.removeEventListener('touchend', this.onTouchEnd)
+    this.viewport.removeEventListener('touchcancel', this.onTouchEnd)
+    this.viewport.removeEventListener('pointerup', this.onPointerUp)
+    this.viewport.removeEventListener('wheel', this.onScroll)
+    document.body.removeEventListener('contextmenu', this.onContextMenu)
+    window.removeEventListener('resize', this.onResize)
+    window.removeEventListener('blur', this.onBlur)
   }
 }
 

@@ -69,6 +69,7 @@ export const buttons = new Set([
   'escape',
   'mouseLeft',
   'mouseRight',
+  'mouseMiddle',
 ])
 
 export const codeToProp = {
@@ -142,6 +143,7 @@ export const codeToProp = {
   Escape: 'escape',
   MouseLeft: 'mouseLeft',
   MouseRight: 'mouseRight',
+  MouseMiddle: 'mouseMiddle',
 }
 
 export const propToCode = {
@@ -215,6 +217,7 @@ export const propToCode = {
   escape: 'Escape',
   mouseLeft: 'MouseLeft',
   mouseRight: 'MouseRight',
+  mouseMiddle: 'MouseMiddle',
 }
 
 export const propToLabel = {
@@ -288,4 +291,5 @@ export const propToLabel = {
   escape: 'Escape',
   mouseLeft: 'LMB',
   mouseRight: 'RMB',
+  mouseMiddle: 'MMB',
 }
