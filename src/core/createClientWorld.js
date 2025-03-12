@@ -1,6 +1,7 @@
 import { World } from './World'
 
 import { Client } from './systems/Client'
+import { ClientPointer } from './systems/ClientPointer'
 import { ClientPrefs } from './systems/ClientPrefs'
 import { ClientControls } from './systems/ClientControls'
 import { ClientNetwork } from './systems/ClientNetwork'
@@ -16,10 +17,12 @@ import { LODs } from './systems/LODs'
 import { Nametags } from './systems/Nametags'
 import { Snaps } from './systems/Snaps'
 import { XR } from './systems/XR'
+import { Solana } from './systems/ClientSolana'
 
 export function createClientWorld() {
   const world = new World()
   world.register('client', Client)
+  world.register('pointer', ClientPointer)
   world.register('prefs', ClientPrefs)
   world.register('controls', ClientControls)
   world.register('network', ClientNetwork)
@@ -35,5 +38,6 @@ export function createClientWorld() {
   world.register('nametags', Nametags)
   world.register('snaps', Snaps)
   world.register('xr', XR)
+  world.register('solana', Solana)
   return world
 }
