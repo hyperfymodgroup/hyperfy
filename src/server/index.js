@@ -17,6 +17,7 @@ import { loadPhysX } from './physx/loadPhysX'
 import { createServerWorld } from '../core/createServerWorld'
 import { hashFile } from '../core/utils-server'
 import { getDB } from './db'
+import { Storage } from './Storage'
 
 const rootDir = path.join(__dirname, '../')
 const worldDir = path.join(rootDir, process.env.WORLD)
@@ -31,8 +32,9 @@ await fs.copy(path.join(rootDir, 'src/core/assets'), path.join(assetsDir))
 
 const db = await getDB(path.join(worldDir, '/db.sqlite'))
 
+const storage = new Storage(path.join(worldDir, '/storage.json'))
 const world = createServerWorld()
-world.init({ db, loadPhysX })
+world.init({ db, storage, loadPhysX })
 
 const fastify = Fastify({ logger: { level: 'error' } })
 
@@ -83,8 +85,7 @@ fastify.get('/env.js', async (req, reply) => {
 
 fastify.post('/api/upload', async (req, reply) => {
   // console.log('DEBUG: slow uploads')
-  await new Promise(resolve => setTimeout(resolve, 2000))
-
+  // await new Promise(resolve => setTimeout(resolve, 2000))
   const file = await req.file()
   const ext = file.filename.split('.').pop().toLowerCase()
   // create temp buffer to store contents
@@ -140,9 +141,9 @@ fastify.get('/status', async (request, reply) => {
     }
     for (const socket of world.network.sockets.values()) {
       status.connectedUsers.push({
-        id: socket.player.data.user.id,
+        id: socket.player.data.userId,
         position: socket.player.position.current.toArray(),
-        name: socket.player.data.user.name,
+        name: socket.player.data.name,
       })
     }
 

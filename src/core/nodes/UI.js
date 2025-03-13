@@ -1,8 +1,9 @@
 import * as THREE from '../extras/three'
 import { isBoolean, isNumber, isString } from 'lodash-es'
+import Yoga from 'yoga-layout'
 
 import { Node } from './Node'
-import { fillRoundRect } from '../extras/fillRoundRect'
+import { fillRoundRect } from '../extras/roundRect'
 import {
   AlignContent,
   AlignItems,
@@ -16,6 +17,7 @@ import {
   JustifyContent,
 } from '../extras/yoga'
 import CustomShaderMaterial from '../libs/three-custom-shader-material'
+import { borderRoundRect } from '../extras/borderRoundRect'
 
 const v1 = new THREE.Vector3()
 const v2 = new THREE.Vector3()
@@ -27,6 +29,7 @@ const m1 = new THREE.Matrix4()
 const iQuaternion = new THREE.Quaternion(0, 0, 0, 1)
 const iScale = new THREE.Vector3(1, 1, 1)
 
+const spaces = ['world', 'screen']
 const billboards = ['none', 'full', 'y']
 const pivots = [
   'top-left',
@@ -41,6 +44,7 @@ const pivots = [
 ]
 
 const defaults = {
+  space: 'world',
   width: 100,
   height: 100,
   size: 0.01,
@@ -50,9 +54,13 @@ const defaults = {
   doubleside: true,
   billboard: 'none',
   pivot: 'center',
+  offset: [0, 0, 0],
+  pointerEvents: true,
 
   transparent: true,
   backgroundColor: null,
+  borderWidth: 0,
+  borderColor: null,
   borderRadius: 0,
   padding: 0,
   flexDirection: 'column',
@@ -68,6 +76,7 @@ export class UI extends Node {
     super(data)
     this.name = 'ui'
 
+    this.space = data.space
     this.width = data.width
     this.height = data.height
     this.size = data.size
@@ -77,9 +86,13 @@ export class UI extends Node {
     this.doubleside = data.doubleside
     this.billboard = data.billboard
     this.pivot = data.pivot
+    this._offset = new THREE.Vector3().fromArray(data.offset || defaults.offset)
+    this.pointerEvents = data.pointerEvents
 
     this.transparent = data.transparent
     this.backgroundColor = data.backgroundColor
+    this.borderWidth = data.borderWidth
+    this.borderColor = data.borderColor
     this.borderRadius = data.borderRadius
     this.padding = data.padding
     this.flexDirection = data.flexDirection
@@ -90,6 +103,8 @@ export class UI extends Node {
     this.gap = data.gap
 
     this.ui = this
+
+    this._offset._onChange = () => this.rebuild()
   }
 
   build() {
@@ -98,33 +113,82 @@ export class UI extends Node {
     this.canvas.width = this._width * this._res
     this.canvas.height = this._height * this._res
     this.canvasCtx = this.canvas.getContext('2d')
-    this.texture = new THREE.CanvasTexture(this.canvas)
-    this.texture.anisotropy = this.ctx.world.graphics.maxAnisotropy
-    // this.texture.minFilter = THREE.LinearFilter // or THREE.NearestFilter for pixel-perfect but potentially aliased text
-    // this.texture.magFilter = THREE.LinearFilter
-    // this.texture.generateMipmaps = true
-    this.geometry = new THREE.PlaneGeometry(this._width, this._height)
-    this.geometry.scale(this._size, this._size, this._size)
-    applyPivot(this._pivot, this.geometry, this._width * this._size, this._height * this._size)
-    this.material = this.createMaterial(this._lit, this.texture, this._billboard, this._transparent, this._doubleside)
-    this.mesh = new THREE.Mesh(this.geometry, this.material)
-    this.mesh.matrixAutoUpdate = false
-    this.mesh.matrixWorldAutoUpdate = false
-    if (this._billboard !== 'none') {
-      v1.setFromMatrixPosition(this.matrixWorld)
-      this.mesh.matrixWorld.compose(v1, iQuaternion, iScale)
+    if (this._space === 'world') {
+      // world-space
+      this.texture = new THREE.CanvasTexture(this.canvas)
+      this.texture.colorSpace = THREE.SRGBColorSpace
+      this.texture.anisotropy = this.ctx.world.graphics.maxAnisotropy
+      // this.texture.minFilter = THREE.LinearFilter // or THREE.NearestFilter for pixel-perfect but potentially aliased text
+      // this.texture.magFilter = THREE.LinearFilter
+      // this.texture.generateMipmaps = true
+      this.geometry = new THREE.PlaneGeometry(this._width, this._height)
+      this.geometry.scale(this._size, this._size, this._size)
+      pivotGeometry(this._pivot, this.geometry, this._width * this._size, this._height * this._size)
+      this.pivotOffset = getPivotOffset(this._pivot, this._width, this._height)
+      this.material = this.createMaterial(this._lit, this.texture, this._billboard, this._transparent, this._doubleside)
+      this.mesh = new THREE.Mesh(this.geometry, this.material)
+      this.mesh.matrixAutoUpdate = false
+      this.mesh.matrixWorldAutoUpdate = false
+      if (this._billboard !== 'none') {
+        v1.setFromMatrixPosition(this.matrixWorld)
+        this.mesh.matrixWorld.compose(v1, iQuaternion, iScale)
+      } else {
+        this.mesh.matrixWorld.copy(this.matrixWorld)
+      }
+      this.ctx.world.stage.scene.add(this.mesh)
+      if (this._pointerEvents) {
+        this.sItem = {
+          matrix: this.matrixWorld,
+          geometry: this.geometry,
+          material: this.material,
+          getEntity: () => this.ctx.entity,
+          node: this,
+        }
+        this.ctx.world.stage.octree.insert(this.sItem)
+      }
     } else {
-      this.mesh.matrixWorld.copy(this.matrixWorld)
+      // screen-space
+      this.canvas.style.position = 'absolute'
+      this.canvas.style.width = this._width + 'px'
+      this.canvas.style.height = this._height + 'px'
+      pivotCanvas(this._pivot, this.canvas, this._width, this._height)
+      this.canvas.style.left = `calc(${this.position.x * 100}% + ${this._offset.x}px)`
+      this.canvas.style.top = `calc(${this.position.y * 100}% + ${this._offset.y}px)`
+      this.canvas.style.pointerEvents = this._pointerEvents ? 'auto' : 'none'
+      if (this._pointerEvents) {
+        let hit
+        const canvas = this.canvas
+        const world = this.ctx.world
+        const onPointerEnter = e => {
+          hit = {
+            node: this,
+            coords: new THREE.Vector3(0, 0, 0),
+          }
+          world.pointer.setScreenHit(hit)
+        }
+        const onPointerMove = e => {
+          const rect = canvas.getBoundingClientRect()
+          const x = (e.clientX - rect.left) * this._res
+          const y = (e.clientY - rect.top) * this._res
+          hit.coords.x = x
+          hit.coords.y = y
+        }
+        const onPointerLeave = e => {
+          hit = null
+          world.pointer.setScreenHit(null)
+        }
+        canvas.addEventListener('pointerenter', onPointerEnter)
+        canvas.addEventListener('pointermove', onPointerMove)
+        canvas.addEventListener('pointerleave', onPointerLeave)
+        this.cleanupPointer = () => {
+          if (hit) world.pointer.setScreenHit(null)
+          canvas.removeEventListener('pointerenter', onPointerEnter)
+          canvas.removeEventListener('pointermove', onPointerMove)
+          canvas.removeEventListener('pointerleave', onPointerLeave)
+        }
+      }
+      this.ctx.world.pointer.ui.prepend(this.canvas)
     }
-    this.ctx.world.stage.scene.add(this.mesh)
-    this.sItem = {
-      matrix: this.matrixWorld,
-      geometry: this.geometry,
-      material: this.material,
-      getEntity: () => this.ctx.entity,
-      node: this,
-    }
-    this.ctx.world.stage.octree.insert(this.sItem)
     this.needsRebuild = false
   }
 
@@ -135,9 +199,18 @@ export class UI extends Node {
       this.mesh.material.dispose()
       this.mesh.geometry.dispose()
       this.mesh = null
-      this.ctx.world.stage.octree.remove(this.sItem)
-      this.sItem = null
+      this.canvas = null
+      if (this.sItem) {
+        this.ctx.world.stage.octree.remove(this.sItem)
+        this.sItem = null
+      }
     }
+    if (this.canvas) {
+      this.ctx.world.pointer.ui.removeChild(this.canvas)
+      this.canvas = null
+    }
+    this.cleanupPointer?.()
+    this.cleanupPointer = null
   }
 
   draw() {
@@ -149,16 +222,33 @@ export class UI extends Node {
     const width = this.yogaNode.getComputedWidth()
     const height = this.yogaNode.getComputedHeight()
     if (this._backgroundColor) {
-      ctx.fillStyle = this._backgroundColor
+      // when theres a border, slightly inset to prevent bleeding
+      const inset = this._borderColor && this._borderWidth ? 1 * this._res : 0
+      const radius = this._borderRadius * this._res - inset
+      const insetLeft = left + inset
+      const insetTop = top + inset
+      const insetWidth = width - inset * 2
+      const insetHeight = height - inset * 2
+      fillRoundRect(ctx, insetLeft, insetTop, insetWidth, insetHeight, radius, this._backgroundColor)
+    }
+    if (this._borderWidth && this._borderColor) {
+      const radius = this._borderRadius * this._res
+      const thickness = this._borderWidth * this._res
+      ctx.strokeStyle = this._borderColor
+      ctx.lineWidth = thickness
       if (this._borderRadius) {
-        fillRoundRect(ctx, left, top, width, height, this._borderRadius * this._res)
+        borderRoundRect(ctx, left, top, width, height, radius, thickness)
       } else {
-        ctx.fillRect(left, top, width, height)
+        const insetLeft = left + thickness / 2
+        const insetTop = top + thickness / 2
+        const insetWidth = width - thickness
+        const insetHeight = height - thickness
+        ctx.strokeRect(insetLeft, insetTop, insetWidth, insetHeight)
       }
     }
     this.box = { left, top, width, height }
     this.children.forEach(child => child.draw(ctx, left, top))
-    this.texture.needsUpdate = true
+    if (this.texture) this.texture.needsUpdate = true
     this.needsRedraw = false
   }
 
@@ -168,13 +258,14 @@ export class UI extends Node {
     this.yogaNode = Yoga.Node.create()
     this.yogaNode.setWidth(this._width * this._res)
     this.yogaNode.setHeight(this._height * this._res)
+    this.yogaNode.setBorder(Yoga.EDGE_ALL, this._borderWidth * this._res)
     this.yogaNode.setPadding(Yoga.EDGE_ALL, this._padding * this._res)
     this.yogaNode.setFlexDirection(FlexDirection[this._flexDirection])
     this.yogaNode.setJustifyContent(JustifyContent[this._justifyContent])
     this.yogaNode.setAlignItems(AlignItems[this._alignItems])
     this.yogaNode.setAlignContent(AlignContent[this._alignContent])
     this.yogaNode.setFlexWrap(FlexWrap[this._flexWrap])
-    this.yogaNode.setGap(Yoga.GUTTER_ALL, this._gap)
+    this.yogaNode.setGap(Yoga.GUTTER_ALL, this._gap * this._res)
     this.build()
     this.needsRedraw = true
     this.setDirty()
@@ -224,11 +315,22 @@ export class UI extends Node {
 
   copy(source, recursive) {
     super.copy(source, recursive)
+    this._space = source._space
     this._width = source._width
     this._height = source._height
     this._size = source._size
     this._res = source._res
+
+    this._lit = source._lit
+    this._doubleside = source._doubleside
+    this._billboard = source._billboard
+    this._pivot = source._pivot
+    this._pointerEvents = source._pointerEvents
+
+    this._transparent = source._transparent
     this._backgroundColor = source._backgroundColor
+    this._borderWidth = source._borderWidth
+    this._borderColor = source._borderColor
     this._borderRadius = source._borderRadius
     this._padding = source._padding
     this._flexDirection = source._flexDirection
@@ -241,39 +343,40 @@ export class UI extends Node {
   }
 
   resolveHit(hit) {
-    if (!hit || !hit.point) return null
+    if (hit?.point) {
+      const inverseMatrix = m1.copy(this.mesh.matrixWorld).invert()
+      // convert world hit point to canvas coordinates (0,0 is top left x,y)
+      v1.copy(hit.point)
+        .applyMatrix4(inverseMatrix)
+        .multiplyScalar(1 / this._size)
+        .sub(this.pivotOffset)
+      const x = v1.x * this._res
+      const y = -v1.y * this._res
+      return this.findNodeAt(x, y)
+    }
+    if (hit?.coords) {
+      return this.findNodeAt(hit.coords.x, hit.coords.y)
+    }
+    return null
+  }
 
-    const inverseMatrix = m1.copy(this.mesh.matrixWorld).invert()
-
-    // Convert world hit point to canvas coordinates
-    v1.copy(hit.point)
-      .applyMatrix4(inverseMatrix)
-      .multiplyScalar(1 / this._size)
-
-    const x = (v1.x + this._width / 2) * this._res
-    const y = (-v1.y + this._height / 2) * this._res
-
+  findNodeAt(x, y) {
     const findHitNode = (node, offsetX = 0, offsetY = 0) => {
       if (!node.box || node._display === 'none') return null
-
       const left = offsetX + node.box.left
       const top = offsetY + node.box.top
       const width = node.box.width
       const height = node.box.height
-
       if (x < left || x > left + width || y < top || y > top + height) {
         return null
       }
-
       // Check children from front to back
       for (let i = node.children.length - 1; i >= 0; i--) {
-        const childHit = findHitNode(node.children[i], left, top)
+        const childHit = findHitNode(node.children[i], offsetX, offsetY)
         if (childHit) return childHit
       }
-
       return node
     }
-
     return findHitNode(this)
   }
 
@@ -337,6 +440,19 @@ export class UI extends Node {
     })
     this.ctx.world.setupMaterial(material)
     return material
+  }
+
+  get space() {
+    return this._space
+  }
+
+  set space(value = defaults.space) {
+    if (!isSpace(value)) {
+      throw new Error('[ui] space not valid')
+    }
+    if (this._space === value) return
+    this._space = value
+    this.rebuild()
   }
 
   get width() {
@@ -445,6 +561,23 @@ export class UI extends Node {
     this.rebuild()
   }
 
+  get offset() {
+    return this._offset
+  }
+
+  get pointerEvents() {
+    return this._pointerEvents
+  }
+
+  set pointerEvents(value = defaults.pointerEvents) {
+    if (!isBoolean(value)) {
+      throw new Error('[ui] pointerEvents not a boolean')
+    }
+    if (this._pointerEvents === value) return
+    this._pointerEvents = value
+    this.redraw()
+  }
+
   get transparent() {
     return this._transparent
   }
@@ -468,6 +601,32 @@ export class UI extends Node {
     }
     if (this._backgroundColor === value) return
     this._backgroundColor = value
+    this.redraw()
+  }
+
+  get borderWidth() {
+    return this._borderWidth
+  }
+
+  set borderWidth(value = defaults.borderWidth) {
+    if (!isNumber(value)) {
+      throw new Error('[ui] borderWidth not a number')
+    }
+    if (this._borderWidth === value) return
+    this._borderWidth = value
+    this.redraw()
+  }
+
+  get borderColor() {
+    return this._borderColor
+  }
+
+  set borderColor(value = defaults.borderColor) {
+    if (value !== null && !isString(value)) {
+      throw new Error('[ui] borderColor not a string')
+    }
+    if (this._borderColor === value) return
+    this._borderColor = value
     this.redraw()
   }
 
@@ -578,7 +737,7 @@ export class UI extends Node {
     }
     if (this._gap === value) return
     this._gap = value
-    this.yogaNode?.setGap(Yoga.GUTTER_ALL, this._gap)
+    this.yogaNode?.setGap(Yoga.GUTTER_ALL, this._gap * this._res)
     this.redraw()
   }
 
@@ -586,6 +745,12 @@ export class UI extends Node {
     if (!this.proxy) {
       var self = this
       let proxy = {
+        get space() {
+          return self.space
+        },
+        set space(value) {
+          self.space = value
+        },
         get width() {
           return self.width
         },
@@ -634,6 +799,15 @@ export class UI extends Node {
         set pivot(value) {
           self.pivot = value
         },
+        get offset() {
+          return self.offset
+        },
+        get pointerEvents() {
+          return self.pointerEvents
+        },
+        set pointerEvents(value) {
+          self.pointerEvents = value
+        },
         get transparent() {
           return self.transparent
         },
@@ -645,6 +819,18 @@ export class UI extends Node {
         },
         set backgroundColor(value) {
           self.backgroundColor = value
+        },
+        get borderWidth() {
+          return self.borderWidth
+        },
+        set borderWidth(value) {
+          self.borderWidth = value
+        },
+        get borderColor() {
+          return self.borderColor
+        },
+        set borderColor(value) {
+          self.borderColor = value
         },
         get borderRadius() {
           return self.borderRadius
@@ -702,7 +888,7 @@ export class UI extends Node {
   }
 }
 
-function applyPivot(pivot, geometry, width, height) {
+function pivotGeometry(pivot, geometry, width, height) {
   const halfWidth = width / 2
   const halfHeight = height / 2
   switch (pivot) {
@@ -736,10 +922,104 @@ function applyPivot(pivot, geometry, width, height) {
   }
 }
 
+function pivotCanvas(pivot, canvas, width, height) {
+  // const halfWidth = width / 2
+  // const halfHeight = height / 2
+  switch (pivot) {
+    case 'top-left':
+      canvas.style.transform = `translate(0%, 0%)`
+      break
+    case 'top-center':
+      canvas.style.transform = `translate(-50%, 0%)`
+      break
+    case 'top-right':
+      canvas.style.transform = `translate(-100%, 0%)`
+      break
+    case 'center-left':
+      canvas.style.transform = `translate(0%, -50%)`
+      break
+    case 'center-right':
+      canvas.style.transform = `translate(-100%, -50%)`
+      break
+    case 'bottom-left':
+      canvas.style.transform = `translate(0%, -100%)`
+      break
+    case 'bottom-center':
+      canvas.style.transform = `translate(-50%, -100%)`
+      break
+    case 'bottom-right':
+      canvas.style.transform = `translate(-100%, -100%)`
+      break
+    case 'center':
+    default:
+      canvas.style.transform = `translate(-50%, -50%)`
+      break
+  }
+}
+
 function isBillboard(value) {
   return billboards.includes(value)
 }
 
 function isPivot(value) {
   return pivots.includes(value)
+}
+
+function isSpace(value) {
+  return spaces.includes(value)
+}
+
+// pivotOffset == ( - pivotX, - pivotY )
+// i.e., the negative of whatever pivotGeometry just did.
+function getPivotOffset(pivot, width, height) {
+  // The top-left corner is originally (-halfW, +halfH).
+  // Then pivotGeometry adds the following translation:
+  const halfW = width / 2
+  const halfH = height / 2
+  let tx = 0,
+    ty = 0
+  switch (pivot) {
+    case 'top-left':
+      tx = +halfW
+      ty = -halfH
+      break
+    case 'top-center':
+      tx = 0
+      ty = -halfH
+      break
+    case 'top-right':
+      tx = -halfW
+      ty = -halfH
+      break
+    case 'center-left':
+      tx = +halfW
+      ty = 0
+      break
+    case 'center-right':
+      tx = -halfW
+      ty = 0
+      break
+    case 'bottom-left':
+      tx = +halfW
+      ty = +halfH
+      break
+    case 'bottom-center':
+      tx = 0
+      ty = +halfH
+      break
+    case 'bottom-right':
+      tx = -halfW
+      ty = +halfH
+      break
+    case 'center':
+    default:
+      tx = 0
+      ty = 0
+      break
+  }
+
+  // So the final local coordinate of top-left corner is:
+  //   originalTopLeft + pivotTranslation
+  // = (-halfW + tx, +halfH + ty)
+  return new THREE.Vector2(-halfW + tx, +halfH + ty)
 }

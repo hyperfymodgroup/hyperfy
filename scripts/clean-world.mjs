@@ -10,7 +10,7 @@ const DRY_RUN = false
 const world = process.env.WORLD || 'world'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const rootDir = path.join(__dirname, './')
+const rootDir = path.join(__dirname, '../')
 const worldDir = path.join(rootDir, world)
 const assetsDir = path.join(worldDir, '/assets')
 
@@ -98,6 +98,11 @@ for (const blueprint of blueprints) {
   }
   if (blueprint.script && blueprint.script.startsWith('asset://')) {
     const asset = blueprint.script.replace('asset://', '')
+    blueprintAssets.add(asset)
+    // console.log(asset)
+  }
+  if (blueprint.image?.url && blueprint.image.url.startsWith('asset://')) {
+    const asset = blueprint.image.url.replace('asset://', '')
     blueprintAssets.add(asset)
     // console.log(asset)
   }

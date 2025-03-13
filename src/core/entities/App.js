@@ -1,23 +1,17 @@
-import { isArray, isFunction, isString } from 'lodash-es'
 import * as THREE from '../extras/three'
+import { isArray, isFunction, isNumber, isString } from 'lodash-es'
 import moment from 'moment'
 
 import { Entity } from './Entity'
-import { glbToNodes } from '../extras/glbToNodes'
 import { createNode } from '../extras/createNode'
 import { LerpVector3 } from '../extras/LerpVector3'
 import { LerpQuaternion } from '../extras/LerpQuaternion'
 import { ControlPriorities } from '../extras/ControlPriorities'
 import { getRef } from '../nodes/Node'
-import { DEG2RAD } from '../extras/general'
+import { Layers } from '../extras/Layers'
+import { createPlayerProxy } from '../extras/createPlayerProxy'
 
 const hotEventNames = ['fixedUpdate', 'update', 'lateUpdate']
-const internalEvents = ['fixedUpdate', 'updated', 'lateUpdate', 'enter', 'leave', 'chat']
-
-const v1 = new THREE.Vector3()
-
-const SNAP_DISTANCE = 0.5
-const SNAP_DEGREES = 5
 
 const Modes = {
   ACTIVE: 'active',
@@ -36,7 +30,14 @@ export class App extends Entity {
     this.worldListeners = new Map()
     this.listeners = {}
     this.eventQueue = []
+    this.snaps = []
+    this.root = createNode('group')
     this.fields = []
+    this.target = null
+    this.projectLimit = Infinity
+    this.playerProxies = new Map()
+    this.hitResultsPool = []
+    this.hitResults = []
     this.build()
   }
 
@@ -127,30 +128,6 @@ export class App extends Entity {
         }
       })
     }
-    // if we're the mover lets bind controls
-    if (this.data.mover === this.world.network.id) {
-      this.lastMoveSendTime = 0
-      this.control = this.world.controls.bind({
-        priority: ControlPriorities.ENTITY,
-        onPress: code => {
-          if (code === 'ShiftLeft') {
-            this.control._lifting = true
-            this.control.pointer.lock()
-            return true
-          }
-        },
-        onRelease: code => {
-          if (code === 'ShiftLeft') {
-            this.control._lifting = false
-            this.control.pointer.unlock()
-            return true
-          }
-        },
-        onScroll: () => {
-          return true
-        },
-      })
-    }
     // if remote is moving, set up to receive network updates
     this.networkPos = new LerpVector3(root.position, this.world.networkRate)
     this.networkQuat = new LerpQuaternion(root.quaternion, this.world.networkRate)
@@ -166,6 +143,15 @@ export class App extends Entity {
   }
 
   unbuild() {
+    // notify any running script
+    this.emit('destroy')
+    // cancel any control
+    this.control?.release()
+    this.control = null
+    // cancel any effects
+    this.playerProxies.forEach(player => {
+      player.cancelEffect()
+    })
     // deactivate local node
     this.root?.deactivate()
     // deactivate world nodes
@@ -176,14 +162,6 @@ export class App extends Entity {
     // clear script event listeners
     this.clearEventListeners()
     this.hotEvents = 0
-    // release control
-    if (this.control) {
-      if (this.control._lifting) {
-        this.control.pointer.unlock()
-      }
-      this.control?.release()
-      this.control = null
-    }
     // cancel update tracking
     this.world.setHot(this, false)
     // abort fetch's etc
@@ -208,86 +186,6 @@ export class App extends Entity {
   }
 
   update(delta) {
-    // if we're moving the app, handle that
-    if (this.data.mover === this.world.network.id) {
-      // we cant just update the root directly and must track where it
-      // should be theoretically, and then apply snap points on top of that.
-      if (!this.target) {
-        this.target = new THREE.Object3D()
-        this.target.position.copy(this.root.position)
-        this.target.quaternion.copy(this.root.quaternion)
-        this.target.rotation.reorder('YXZ')
-        document.body.style.cursor = 'grabbing'
-      }
-      if (this.control._lifting) {
-        // if shift is down we're raising and lowering the app
-        this.target.position.y -= this.world.controls.pointer.delta.y * delta * 0.5
-      } else {
-        // otherwise move with the cursor
-        const position = this.world.controls.pointer.position
-        const hits = this.world.stage.raycastPointer(position)
-        let hit
-        for (const _hit of hits) {
-          const entity = _hit.getEntity?.()
-          // ignore self and players
-          if (entity === this || entity?.isPlayer) continue
-          hit = _hit
-          break
-        }
-        if (hit) {
-          this.target.position.copy(hit.point)
-        }
-        // and rotate with the mouse wheel
-        this.target.rotation.y += this.control.scroll.delta * 0.1 * delta
-      }
-      // apply movement
-      this.root.position.copy(this.target.position)
-      this.root.quaternion.copy(this.target.quaternion)
-      // snap rotation to degrees
-      const newY = this.target.rotation.y
-      const degrees = newY / DEG2RAD
-      const snappedDegrees = Math.round(degrees / SNAP_DEGREES) * SNAP_DEGREES
-      this.root.rotation.y = snappedDegrees * DEG2RAD
-      // update matrix
-      this.root.clean()
-      // and snap to any nearby points
-      for (const pos of this.snaps) {
-        const result = this.world.snaps.octree.query(pos, SNAP_DISTANCE)[0]
-        if (result) {
-          const offset = v1.copy(result.position).sub(pos)
-          this.root.position.add(offset)
-          break
-        }
-      }
-
-      // periodically send updates
-      this.lastMoveSendTime += delta
-      if (this.lastMoveSendTime > this.world.networkRate) {
-        this.world.network.send('entityModified', {
-          id: this.data.id,
-          position: this.root.position.toArray(),
-          quaternion: this.root.quaternion.toArray(),
-        })
-        this.lastMoveSendTime = 0
-      }
-      // if we left clicked, we can place the app
-      if (this.control.pressed.MouseLeft) {
-        this.data.mover = null
-        this.data.position = this.root.position.toArray()
-        this.data.quaternion = this.root.quaternion.toArray()
-        this.data.state = {}
-        this.world.network.send('entityModified', {
-          id: this.data.id,
-          mover: null,
-          position: this.data.position,
-          quaternion: this.data.quaternion,
-          state: this.data.state,
-        })
-        this.build()
-        this.target = null
-        document.body.style.cursor = 'default'
-      }
-    }
     // if someone else is moving the app, interpolate updates
     if (this.data.mover && this.data.mover !== this.world.network.id) {
       this.networkPos.update(delta)
@@ -340,11 +238,18 @@ export class App extends Entity {
     }
     if (data.hasOwnProperty('position')) {
       this.data.position = data.position
-      this.networkPos.pushArray(data.position)
+      if (this.data.mover) {
+        this.networkPos.pushArray(data.position)
+      } else {
+        rebuild = true
+      }
     }
     if (data.hasOwnProperty('quaternion')) {
       this.data.quaternion = data.quaternion
       this.networkQuat.pushArray(data.quaternion)
+    }
+    if (data.hasOwnProperty('pinned')) {
+      this.data.pinned = data.pinned
     }
     if (data.hasOwnProperty('state')) {
       this.data.state = data.state
@@ -355,19 +260,13 @@ export class App extends Entity {
     }
   }
 
-  move() {
-    this.data.mover = this.world.network.id
-    this.build()
-    this.world.network.send('entityModified', { id: this.data.id, mover: this.data.mover })
-  }
-
   crash() {
     this.build(true)
   }
 
   destroy(local) {
-    if (this.dead) return
-    this.dead = true
+    if (this.destroyed) return
+    this.destroyed = true
 
     this.unbuild()
 
@@ -382,6 +281,7 @@ export class App extends Entity {
     if (!this.listeners[name]) {
       this.listeners[name] = new Set()
     }
+    if (this.listeners[name].has(callback)) return
     this.listeners[name].add(callback)
     if (hotEventNames.includes(name)) {
       this.hotEvents++
@@ -391,6 +291,7 @@ export class App extends Entity {
 
   off(name, callback) {
     if (!this.listeners[name]) return
+    if (!this.listeners[name].has(callback)) return
     this.listeners[name].delete(callback)
     if (hotEventNames.includes(name)) {
       this.hotEvents--
@@ -447,6 +348,7 @@ export class App extends Entity {
         json: async () => await resp.json(),
         text: async () => await resp.text(),
         blob: async () => await resp.blob(),
+        arrayBuffer: async () => await resp.arrayBuffer(),
       }
       return secureResp
     } catch (err) {
@@ -455,167 +357,109 @@ export class App extends Entity {
     }
   }
 
-  getWorldProxy() {
-    const entity = this
-    const world = this.world
-    return {
-      get networkId() {
-        return world.network.id
-      },
-      get isServer() {
-        return world.network.isServer
-      },
-      get isClient() {
-        return world.network.isClient
-      },
-      add(pNode) {
-        const node = getRef(pNode)
-        if (!node) return
-        if (node.parent) {
-          node.parent.remove(node)
-        }
-        entity.worldNodes.add(node)
-        node.activate({ world, entity })
-      },
-      remove(pNode) {
-        const node = getRef(pNode)
-        if (!node) return
-        if (node.parent) return // its not in world
-        if (!entity.worldNodes.has(node)) return
-        entity.worldNodes.delete(node)
-        node.deactivate()
-      },
-      attach(pNode) {
-        const node = getRef(pNode)
-        if (!node) return
-        const parent = node.parent
-        if (!parent) return
-        parent.remove(node)
-        node.matrix.copy(node.matrixWorld)
-        node.matrix.decompose(node.position, node.quaternion, node.scale)
-        node.activate({ world, entity })
-        entity.worldNodes.add(node)
-      },
-      on(name, callback) {
-        entity.onWorldEvent(name, callback)
-      },
-      off(name, callback) {
-        entity.offWorldEvent(name, callback)
-      },
-      emit(name, data) {
-        if (internalEvents.includes(name)) {
-          return console.error(`apps cannot emit internal events (${name})`)
-        }
-        warn('world.emit() is deprecated, use app.emit() instead')
-        world.events.emit(name, data)
-      },
-      getTime() {
-        return world.network.getTime()
-      },
-      getTimestamp(format) {
-        if (!format) return moment().toISOString()
-        return moment().format(format)
-      },
-      chat(msg, broadcast) {
-        if (!msg) return
-        world.chat.add(msg, broadcast)
-      },
-      getPlayer(playerId) {
-        const player = world.entities.getPlayer(playerId || world.entities.player?.data.id)
-        return player?.getProxy()
-      },
+  getNodes() {
+    // note: this is currently just used in the nodes tab in the app inspector
+    // to get a clean hierarchy
+    if (!this.blueprint) return
+    const type = this.blueprint.model.endsWith('vrm') ? 'avatar' : 'model'
+    let glb = this.world.loader.get(type, this.blueprint.model)
+    if (!glb) return
+    return glb.toNodes()
+  }
+
+  getPlayerProxy(playerId) {
+    if (playerId === undefined) playerId = this.world.entities.player?.data.id
+    let proxy = this.playerProxies.get(playerId)
+    if (!proxy || proxy.destroyed) {
+      const player = this.world.entities.getPlayer(playerId)
+      if (!player) return null
+      proxy = createPlayerProxy(player)
+      this.playerProxies.set(playerId, proxy)
     }
+    return proxy
+  }
+
+  getWorldProxy() {
+    if (!this.worldProxy) {
+      const entity = this
+      const getterFns = {
+        networkId: 'getNetworkId',
+        isServer: 'getIsServer',
+        isClient: 'getIsClient',
+      }
+      const worldApi = this.world.apps.worldApi
+      this.worldProxy = new Proxy(
+        {},
+        {
+          get: (target, prop) => {
+            // handle getters
+            if (prop in getterFns) {
+              return worldApi[getterFns[prop]](entity)
+            }
+            // handle methods
+            if (prop in worldApi) {
+              const method = worldApi[prop]
+              return (...args) => {
+                return method(entity, ...args)
+              }
+            }
+            return undefined
+          },
+        }
+      )
+    }
+    return this.worldProxy
   }
 
   getAppProxy() {
-    const entity = this
-    const world = this.world
-    let proxy = {
-      get instanceId() {
-        return entity.data.id
-      },
-      get version() {
-        return entity.blueprint.version
-      },
-      get state() {
-        return entity.data.state
-      },
-      set state(value) {
-        entity.data.state = value
-      },
-      on(name, callback) {
-        entity.on(name, callback)
-      },
-      off(name, callback) {
-        entity.off(name, callback)
-      },
-      send(name, data, ignoreSocketId) {
-        if (internalEvents.includes(name)) {
-          return console.error(`apps cannot send internal events (${name})`)
+    if (!this.appProxy) {
+      const entity = this
+      const getterFns = {
+        instanceId: 'getInstanceId',
+        version: 'getVersion',
+        modelUrl: 'getModelUrl',
+        state: 'getState',
+        props: 'getProps',
+        config: 'getConfig',
+      }
+      const setterFns = {
+        state: 'setState',
+      }
+      const appApi = this.world.apps.appApi
+      this.appProxy = new Proxy(
+        {},
+        {
+          get: (target, prop) => {
+            // handle getters
+            if (prop in getterFns) {
+              return appApi[getterFns[prop]](entity)
+            }
+            // handle methods
+            if (prop in appApi) {
+              const method = appApi[prop]
+              return (...args) => {
+                return method(entity, ...args)
+              }
+            }
+            // handle root node
+            return entity.root.getProxy()[prop]
+          },
+          set: (target, prop, value) => {
+            // handle setter fns
+            if (prop in setterFns) {
+              appApi[setterFns[prop]](entity, value)
+              return true
+            }
+            // also inherit app root node
+            if (prop in entity.root.getProxy()) {
+              entity.root.getProxy()[prop] = value
+              return true
+            }
+            return true
+          },
         }
-        // NOTE: on the client ignoreSocketId is a no-op because it can only send events to the server
-        const event = [entity.data.id, entity.blueprint.version, name, data]
-        world.network.send('entityEvent', event, ignoreSocketId)
-      },
-      emit(name, data) {
-        if (internalEvents.includes(name)) {
-          return console.error(`apps cannot emit internal events (${name})`)
-        }
-        world.events.emit(name, data)
-      },
-      get(id) {
-        const node = entity.root.get(id)
-        if (!node) return null
-        return node.getProxy()
-      },
-      create(name, data) {
-        const node = entity.createNode(name, data)
-        return node.getProxy()
-      },
-      control(options) {
-        // TODO: only allow on user interaction
-        // TODO: show UI with a button to release()
-        entity.control = world.controls.bind({
-          ...options,
-          priority: ControlPriorities.APP,
-          object: entity,
-        })
-        return entity.control
-      },
-      configure(fnOrArray) {
-        if (isArray(fnOrArray)) {
-          entity.fields = fnOrArray
-        } else if (isFunction(fnOrArray)) {
-          entity.fields = fnOrArray() // deprecated
-        }
-        if (!isArray(entity.fields)) {
-          entity.fields = []
-        }
-        // apply any initial values
-        const props = entity.blueprint.props
-        for (const field of entity.fields) {
-          if (field.initial && props[field.key] === undefined) {
-            props[field.key] = field.initial
-          }
-        }
-        entity.onFields?.(entity.fields)
-      },
-      get props() {
-        return entity.blueprint.props
-      },
-      get config() {
-        // deprecated. will be removed
-        return entity.blueprint.props
-      },
+      )
     }
-    proxy = Object.defineProperties(proxy, Object.getOwnPropertyDescriptors(this.root.getProxy())) // inherit root Node properties
-    return proxy
+    return this.appProxy
   }
-}
-
-const warned = new Set()
-function warn(str) {
-  if (warned.has(str)) return
-  console.warn(str)
-  warned.add(str)
 }

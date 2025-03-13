@@ -3,10 +3,14 @@ import * as THREE from '../extras/three'
 
 const _v1 = new THREE.Vector3()
 const _v2 = new THREE.Vector3()
+const _v3 = new THREE.Vector3()
 const _q1 = new THREE.Quaternion()
 const _m1 = new THREE.Matrix4()
 const _m2 = new THREE.Matrix4()
 const _m3 = new THREE.Matrix4()
+const _box3 = new THREE.Box3()
+const _sphere = new THREE.Sphere()
+const _points = []
 
 const defaults = {
   active: true,
@@ -16,6 +20,8 @@ const defaults = {
 }
 
 let nodeIds = -1
+
+const EPSILON = 0.000000001
 
 const secure = { allowRef: false }
 export function getRef(pNode) {
@@ -55,6 +61,11 @@ export class Node {
       this.setTransformed()
     })
     this.scale._onChange(() => {
+      // scale set to exactly zero on any axis causes matrices to have NaN values.
+      // this causes our octrees to fail into an infinite loop
+      if (this.scale.x === 0 || this.scale.y === 0 || this.scale.z === 0) {
+        return this.scale.set(this.scale.x || EPSILON, this.scale.y || EPSILON, this.scale.z || EPSILON)
+      }
       this.setTransformed()
     })
     this._onPointerEnter = data.onPointerEnter
@@ -91,6 +102,8 @@ export class Node {
       children[i].deactivate()
     }
     this.unmount()
+    this.isDirty = false
+    this.isTransformed = true
     this.mounted = false
   }
 
@@ -170,6 +183,8 @@ export class Node {
     if (!this._active && this.mounted) {
       this.deactivate()
     } else if (this._active && this.parent?.mounted) {
+      this.activate(this.parent.ctx)
+    } else if (this._active && !this.parent) {
       this.activate(this.ctx)
     }
   }
@@ -242,6 +257,7 @@ export class Node {
     this._onPointerDown = source._onPointerDown
     this._onPointerUp = source._onPointerUp
     this._cursor = source._cursor
+    this._active = source._active
     if (recursive) {
       for (let i = 0; i < source.children.length; i++) {
         const child = source.children[i]
@@ -268,8 +284,25 @@ export class Node {
     return vec3
   }
 
-  getStats() {
-    return null
+  getStats(recursive, stats) {
+    if (!stats) {
+      stats = {
+        geometries: new Set(),
+        triangles: 0,
+        textureBytes: 0,
+      }
+    }
+    this.applyStats(stats)
+    if (recursive) {
+      for (const child of this.children) {
+        child.getStats(recursive, stats)
+      }
+    }
+    return stats
+  }
+
+  applyStats(stats) {
+    // nodes should override this and add their stats
   }
 
   get onPointerEnter() {
@@ -363,6 +396,11 @@ export class Node {
         },
         set parent(value) {
           throw new Error('Cannot set parent directly')
+        },
+        get children() {
+          return self.children.map(child => {
+            return child.getProxy()
+          })
         },
         add(pNode) {
           const node = getRef(pNode)

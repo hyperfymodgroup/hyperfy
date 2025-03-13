@@ -3,8 +3,6 @@ import { Entity } from './Entity'
 import { createNode } from '../extras/createNode'
 import { LerpQuaternion } from '../extras/LerpQuaternion'
 import { LerpVector3 } from '../extras/LerpVector3'
-import { emotes } from '../extras/playerEmotes'
-import { createPlayerProxy } from '../extras/createPlayerProxy'
 
 let capsuleGeometry
 {
@@ -44,8 +42,9 @@ export class PlayerRemote extends Entity {
     // })
     // this.base.add(this.caps)
 
-    this.nametag = createNode('nametag', { label: this.data.user.name, active: false })
-    this.base.add(this.nametag)
+    this.aura = createNode('group')
+    this.nametag = createNode('nametag', { label: this.data.name, health: this.data.health, active: false })
+    this.aura.add(this.nametag)
 
     this.bubble = createNode('ui', {
       width: 300,
@@ -70,30 +69,37 @@ export class PlayerRemote extends Entity {
     })
     this.bubble.add(this.bubbleBox)
     this.bubbleBox.add(this.bubbleText)
-    this.base.add(this.bubble)
+    this.aura.add(this.bubble)
 
+    this.aura.activate({ world: this.world, entity: this })
     this.base.activate({ world: this.world, entity: this })
 
     this.applyAvatar()
 
     this.position = new LerpVector3(this.base.position, this.world.networkRate)
     this.quaternion = new LerpQuaternion(this.base.quaternion, this.world.networkRate)
-    this.emote = 'asset://emote-idle.glb'
     this.teleport = 0
 
     this.world.setHot(this, true)
-    this.world.events.emit('enter', { player: this.getProxy() })
+
+    // on the client remote players emit enter events here.
+    // but on the server, enter events is delayed for players entering until after their snapshot is sent
+    // that way they can actually respond correctly to follow-through events.
+    // see ServerNetwork.js -> onConnection
+    if (this.world.network.isClient) {
+      this.world.events.emit('enter', { playerId: this.data.id })
+    }
   }
 
   applyAvatar() {
-    const avatarUrl = this.data.user.avatar || 'asset://avatar.vrm'
+    const avatarUrl = this.data.sessionAvatar || this.data.avatar || 'asset://avatar.vrm'
     if (this.avatarUrl === avatarUrl) return
     this.world.loader.load('avatar', avatarUrl).then(src => {
       if (this.avatar) this.avatar.deactivate()
       this.avatar = src.toNodes().get('avatar')
       this.base.add(this.avatar)
-      this.nametag.position.y = this.avatar.height + 0.2
-      this.bubble.position.y = this.avatar.height + 0.2
+      this.nametag.position.y = this.avatar.getHeadToHeight() + 0.2
+      this.bubble.position.y = this.avatar.getHeadToHeight() + 0.2
       if (!this.bubble.active) {
         this.nametag.active = true
       }
@@ -101,13 +107,49 @@ export class PlayerRemote extends Entity {
     })
   }
 
+  getAnchorMatrix() {
+    if (this.data.effect?.anchorId) {
+      return this.world.anchors.get(this.data.effect.anchorId)
+    }
+  }
+
   update(delta) {
-    this.position.update(delta)
-    this.quaternion.update(delta)
-    this.avatar?.setEmote(emotes[this.emote])
+    const anchor = this.getAnchorMatrix()
+    if (!anchor) {
+      this.position.update(delta)
+      this.quaternion.update(delta)
+    }
+    this.avatar?.setEmote(this.data.emote)
+  }
+
+  lateUpdate(delta) {
+    const anchor = this.getAnchorMatrix()
+    if (anchor) {
+      this.position.snap()
+      this.quaternion.snap()
+      this.base.position.setFromMatrixPosition(anchor)
+      this.base.quaternion.setFromRotationMatrix(anchor)
+    }
+    if (this.avatar) {
+      const matrix = this.avatar.getBoneTransform('head')
+      if (matrix) {
+        this.aura.position.setFromMatrixPosition(matrix)
+      }
+    }
+  }
+
+  setEffect(effect, onEnd) {
+    if (this.data.effect) {
+      this.data.effect = null
+      this.onEffectEnd?.()
+      this.onEffectEnd = null
+    }
+    this.data.effect = effect
+    this.onEffectEnd = onEnd
   }
 
   modify(data) {
+    let avatarChanged
     if (data.hasOwnProperty('t')) {
       this.teleport++
     }
@@ -121,11 +163,40 @@ export class PlayerRemote extends Entity {
     }
     if (data.hasOwnProperty('e')) {
       this.data.emote = data.e
-      this.emote = data.e
     }
-    if (data.hasOwnProperty('user')) {
-      this.data.user = data.user
-      this.nametag.label = data.user.name
+    if (data.hasOwnProperty('ef')) {
+      if (this.data.effect) {
+        this.data.effect = null
+        this.onEffectEnd?.()
+        this.onEffectEnd = null
+      }
+      this.data.effect = data.ef
+    }
+    if (data.hasOwnProperty('name')) {
+      this.data.name = data.name
+      this.nametag.label = data.name
+    }
+    if (data.hasOwnProperty('health')) {
+      this.data.health = data.health
+      this.nametag.health = data.health
+      this.world.events.emit('health', { playerId: this.data.id, health: data.health })
+    }
+    if (data.hasOwnProperty('avatar')) {
+      this.data.avatar = data.avatar
+      avatarChanged = true
+    }
+    if (data.hasOwnProperty('sessionAvatar')) {
+      this.data.sessionAvatar = data.sessionAvatar
+      avatarChanged = true
+    }
+    if (data.hasOwnProperty('roles')) {
+      this.data.roles = data.roles
+    }
+    if (data.hasOwnProperty('solana')) {
+      this.data.solana = data.solana
+      this.world.events.emit('solana', { playerId: this.data.id })
+    }
+    if (avatarChanged) {
       this.applyAvatar()
     }
   }
@@ -142,26 +213,21 @@ export class PlayerRemote extends Entity {
   }
 
   destroy(local) {
-    if (this.dead) return
-    this.dead = true
+    if (this.destroyed) return
+    this.destroyed = true
 
     clearTimeout(this.chatTimer)
     this.base.deactivate()
     this.avatar = null
     this.world.setHot(this, false)
-    this.world.events.emit('leave', { player: this.getProxy() })
+    this.world.events.emit('leave', { playerId: this.data.id })
+    this.aura.deactivate()
+    this.aura = null
 
     this.world.entities.remove(this.data.id)
     // if removed locally we need to broadcast to server/clients
     if (local) {
       this.world.network.send('entityRemoved', this.data.id)
     }
-  }
-
-  getProxy() {
-    if (!this.proxy) {
-      this.proxy = createPlayerProxy(this)
-    }
-    return this.proxy
   }
 }

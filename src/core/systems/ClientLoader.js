@@ -9,6 +9,8 @@ import { createVRMFactory } from '../extras/createVRMFactory'
 import { glbToNodes } from '../extras/glbToNodes'
 import { createEmoteFactory } from '../extras/createEmoteFactory'
 import { TextureLoader } from 'three'
+import { formatBytes } from '../extras/formatBytes'
+import { emoteUrls } from '../extras/playerEmotes'
 
 // THREE.Cache.enabled = true
 
@@ -29,6 +31,7 @@ export class ClientLoader extends System {
     this.texLoader = new TextureLoader()
     this.gltfLoader = new GLTFLoader()
     this.gltfLoader.register(parser => new VRMLoaderPlugin(parser))
+    this.preloadItems = []
   }
 
   start() {
@@ -51,8 +54,12 @@ export class ClientLoader extends System {
     return this.results.get(key)
   }
 
-  preload(items) {
-    const promises = items.map(item => this.load(item.type, item.url))
+  preload(type, url) {
+    this.preloadItems.push({ type, url })
+  }
+
+  execPreload() {
+    const promises = this.preloadItems.map(item => this.load(item.type, item.url))
     this.preloader = Promise.allSettled(promises).then(() => {
       this.preloader = null
       this.world.emit('ready', true)
@@ -63,8 +70,13 @@ export class ClientLoader extends System {
     this.files.set(url, file)
   }
 
+  getFile(url) {
+    url = this.world.resolveURL(url)
+    return this.files.get(url)
+  }
+
   loadFile = async url => {
-    url = this.resolveURL(url)
+    url = this.world.resolveURL(url)
     if (this.files.has(url)) {
       return this.files.get(url)
     }
@@ -119,6 +131,12 @@ export class ClientLoader extends System {
           toNodes() {
             return node.clone(true)
           },
+          getStats() {
+            const stats = node.getStats(true)
+            // append file size
+            stats.fileBytes = file.size
+            return stats
+          },
         }
         this.results.set(key, model)
         return model
@@ -139,16 +157,25 @@ export class ClientLoader extends System {
         const buffer = await file.arrayBuffer()
         const glb = await this.gltfLoader.parseAsync(buffer)
         const factory = createVRMFactory(glb, this.world.setupMaterial)
-        const node = createNode('group')
-        const node2 = createNode('avatar', { id: 'avatar', factory, hooks: this.vrmHooks })
+        const hooks = this.vrmHooks
+        const node = createNode('group', { id: '$root' })
+        const node2 = createNode('avatar', { id: 'avatar', factory, hooks })
         node.add(node2)
         const avatar = {
+          factory,
+          hooks,
           toNodes(customHooks) {
             const clone = node.clone(true)
             if (customHooks) {
               clone.get('avatar').hooks = customHooks
             }
             return clone
+          },
+          getStats() {
+            const stats = node.getStats(true)
+            // append file size
+            stats.fileBytes = file.size
+            return stats
           },
         }
         this.results.set(key, avatar)
@@ -194,6 +221,12 @@ export class ClientLoader extends System {
           toNodes() {
             return node.clone(true)
           },
+          getStats() {
+            const stats = node.getStats(true)
+            // append file size
+            stats.fileBytes = file.size
+            return stats
+          },
         }
         this.results.set(key, model)
         return model
@@ -214,16 +247,25 @@ export class ClientLoader extends System {
     if (type === 'avatar') {
       promise = this.gltfLoader.loadAsync(localUrl).then(glb => {
         const factory = createVRMFactory(glb, this.world.setupMaterial)
-        const node = createNode('group')
-        const node2 = createNode('avatar', { id: 'avatar', factory, hooks: this.vrmHooks })
+        const hooks = this.vrmHooks
+        const node = createNode('group', { id: '$root' })
+        const node2 = createNode('avatar', { id: 'avatar', factory, hooks })
         node.add(node2)
         const avatar = {
+          factory,
+          hooks,
           toNodes(customHooks) {
             const clone = node.clone(true)
             if (customHooks) {
               clone.get('avatar').hooks = customHooks
             }
             return clone
+          },
+          getStats() {
+            const stats = node.getStats(true)
+            // append file size
+            stats.fileBytes = file.size
+            return stats
           },
         }
         this.results.set(key, avatar)
@@ -255,12 +297,5 @@ export class ClientLoader extends System {
       })
     }
     this.promises.set(key, promise)
-  }
-
-  resolveURL(url) {
-    if (url.startsWith('asset://')) {
-      return url.replace('asset:/', process.env.PUBLIC_ASSETS_URL)
-    }
-    return url
   }
 }

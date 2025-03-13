@@ -1,4 +1,6 @@
+import { emoteUrls } from '../extras/playerEmotes'
 import { readPacket, writePacket } from '../packets'
+import { storage } from '../storage'
 import { hashFile } from '../utils-client'
 import { System } from './System'
 
@@ -20,9 +22,8 @@ export class ClientNetwork extends System {
     this.queue = []
   }
 
-  init({ wsUrl, apiUrl }) {
-    const authToken = this.world.client.storage.get('authToken')
-    this.apiUrl = apiUrl
+  init({ wsUrl }) {
+    const authToken = storage.get('authToken')
     this.ws = new WebSocket(`${wsUrl}?authToken=${authToken}`)
     this.ws.binaryType = 'arraybuffer'
     this.ws.addEventListener('message', this.onPacket)
@@ -36,6 +37,11 @@ export class ClientNetwork extends System {
   send(name, data) {
     // console.log('->', name, data)
     const packet = writePacket(name, data)
+    this.ws.send(packet)
+  }
+
+  sendTo(playerId, name, data) {
+    const packet = writePacket('sendTo', { playerId, name, data })
     this.ws.send(packet)
   }
 
@@ -88,14 +94,51 @@ export class ClientNetwork extends System {
   onSnapshot(data) {
     this.id = data.id
     this.serverTimeOffset = data.serverTime - performance.now()
+    this.apiUrl = data.apiUrl
+    this.maxUploadSize = data.maxUploadSize
+    this.world.assetsUrl = data.assetsUrl
+
+    // preload some blueprints
+    for (const item of data.blueprints) {
+      if (item.preload) {
+        if (item.model) {
+          const type = item.model.endsWith('.vrm') ? 'avatar' : 'model'
+          this.world.loader.preload(type, item.model)
+        }
+        if (item.script) {
+          this.world.loader.preload('script', item.script)
+        }
+        for (const value of Object.values(item.props || {})) {
+          if (value === undefined || value === null || !value?.url || !value?.type) continue
+          this.world.loader.preload(value.type, value.url)
+        }
+      }
+    }
+    // preload emotes
+    for (const url of emoteUrls) {
+      this.world.loader.preload('emote', url)
+    }
+    // preload local player avatar
+    for (const item of data.entities) {
+      if (item.type === 'player' && item.owner === this.id) {
+        const url = item.sessionAvatar || item.avatar || 'asset://avatar.vrm'
+        this.world.loader.preload('avatar', url)
+      }
+    }
+    this.world.loader.execPreload()
+
     this.world.chat.deserialize(data.chat)
     this.world.blueprints.deserialize(data.blueprints)
     this.world.entities.deserialize(data.entities)
-    this.world.client.storage.set('authToken', data.authToken)
+    storage.set('authToken', data.authToken)
   }
 
   onChatAdded = msg => {
     this.world.chat.add(msg, false)
+  }
+
+  onChatCleared = () => {
+    this.world.chat.clear()
   }
 
   onBlueprintAdded = blueprint => {
@@ -112,6 +155,7 @@ export class ClientNetwork extends System {
 
   onEntityModified = data => {
     const entity = this.world.entities.get(data.id)
+    if (!entity) return console.error('onEntityModified: no entity found', data)
     entity.modify(data)
   }
 
@@ -127,6 +171,31 @@ export class ClientNetwork extends System {
 
   onPlayerTeleport = data => {
     this.world.entities.player?.teleport(data)
+  }
+
+  onPlayerPush = data => {
+    this.world.entities.player?.push(data.force)
+  }
+
+  onPlayerSessionAvatar = data => {
+    this.world.entities.player?.setSessionAvatar(data.avatar)
+  }
+
+  onKick = code => {
+    this.world.emit('kick', code)
+  }
+
+  onTokenMetadata = ({ tokenMint, metadata }) => {
+    console.log(`Received metadata for token: ${tokenMint}`, metadata)
+
+    // Get the Solana system
+    const solana = this.world.solana
+    if (!solana) {
+      console.error('Solana system not initialized')
+      return
+    }
+
+    solana.tokens.set(tokenMint, metadata)
   }
 
   onClose = code => {

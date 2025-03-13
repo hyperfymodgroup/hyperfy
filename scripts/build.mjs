@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url'
 
 const dev = process.argv.includes('--dev')
 const dirname = path.dirname(fileURLToPath(import.meta.url))
-const rootDir = path.join(dirname, './')
+const rootDir = path.join(dirname, '../')
 const buildDir = path.join(rootDir, 'build')
 
 await fs.emptyDir(buildDir)
@@ -23,7 +23,7 @@ const clientHtmlDest = path.join(rootDir, 'build/public/index.html')
 
 {
   const clientCtx = await esbuild.context({
-    entryPoints: ['src/client/index.js'],
+    entryPoints: ['src/client/index.js', 'src/client/components/WalletProvider.js'],
     entryNames: '/[name]-[hash]',
     outdir: clientBuildDir,
     platform: 'browser',

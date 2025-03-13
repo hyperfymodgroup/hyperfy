@@ -9,11 +9,25 @@ import {
   ToneMappingMode,
   SelectiveBloomEffect,
   BlendFunction,
+  Selection,
 } from 'postprocessing'
 
 import { System } from './System'
 
 const v1 = new THREE.Vector3()
+
+let renderer
+function getRenderer() {
+  if (!renderer) {
+    renderer = new THREE.WebGLRenderer({
+      powerPreference: 'high-performance',
+      antialias: true,
+      // logarithmicDepthBuffer: true,
+      // reverseDepthBuffer: true,
+    })
+  }
+  return renderer
+}
 
 /**
  * Graphics System
@@ -33,13 +47,10 @@ export class ClientGraphics extends System {
     this.width = this.viewport.offsetWidth
     this.height = this.viewport.offsetHeight
     this.aspect = this.width / this.height
-    this.renderer = new THREE.WebGLRenderer({
-      powerPreference: 'high-performance',
-      antialias: true,
-    })
+    this.renderer = getRenderer()
     this.renderer.setSize(this.width, this.height)
     this.renderer.setClearColor(0xffffff, 0)
-    this.renderer.setPixelRatio(this.world.client.settings.pixelRatio || window.devicePixelRatio)
+    this.renderer.setPixelRatio(this.world.prefs.dpr)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.renderer.toneMapping = THREE.NoToneMapping
@@ -49,7 +60,8 @@ export class ClientGraphics extends System {
     this.renderer.xr.setReferenceSpaceType('local-floor')
     this.renderer.xr.setFoveation(1)
     this.maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy()
-    this.usePostprocessing = this.world.client.settings.postprocessing
+    THREE.Texture.DEFAULT_ANISOTROPY = this.maxAnisotropy
+    this.usePostprocessing = this.world.prefs.postprocessing
     const context = this.renderer.getContext()
     const maxMultisampling = context.getParameter(context.MAX_SAMPLES)
     this.composer = new EffectComposer(this.renderer, {
@@ -69,7 +81,7 @@ export class ClientGraphics extends System {
     this.bloom.inverted = true
     this.bloom.selection.layer = 14 // NO_BLOOM layer
     this.bloomPass = new EffectPass(this.world.camera, this.bloom)
-    this.bloomPass.enabled = this.world.client.settings.bloom
+    this.bloomPass.enabled = this.world.prefs.bloom
     this.composer.addPass(this.bloomPass)
     this.effectPass = new EffectPass(
       this.world.camera,
@@ -81,7 +93,7 @@ export class ClientGraphics extends System {
       })
     )
     this.composer.addPass(this.effectPass)
-    this.world.client.settings.on('change', this.onSettingsChange)
+    this.world.prefs.on('change', this.onPrefsChange)
     this.resizer = new ResizeObserver(() => {
       this.resize(this.viewport.offsetWidth, this.viewport.offsetHeight)
     })
@@ -125,10 +137,11 @@ export class ClientGraphics extends System {
     object3d.scale.setScalar(scale)
   }
 
-  onSettingsChange = changes => {
+  onPrefsChange = changes => {
     // pixel ratio
-    if (changes.pixelRatio) {
-      this.renderer.setPixelRatio(changes.pixelRatio.value || window.devicePixelRatio)
+    if (changes.dpr) {
+      this.renderer.setPixelRatio(changes.dpr.value)
+      this.resize(this.width, this.height)
     }
     // postprocessing
     if (changes.postprocessing) {
@@ -138,5 +151,9 @@ export class ClientGraphics extends System {
     if (changes.bloom) {
       this.bloomPass.enabled = changes.bloom.value
     }
+  }
+
+  destroy() {
+    this.resizer.disconnect()
   }
 }

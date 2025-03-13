@@ -73,6 +73,22 @@ A number input. Also supports math entry and up/down stepping.
 }
 ```
 
+### Range
+
+A range slider input
+
+```jsx
+{
+  type: 'range',
+  key: String,           // the key on `props` to set this value
+  label: String,         // the label for the slider
+  min: Number,           // the minimum value allowed (default = 0)
+  max: Number,           // the maximum value allowed (default = 1)
+  step: Number,          // the step amount when sliding (default= 0.05)
+  initial: Number,       // the initial value to set if not configured (default = 0)
+}
+```
+
 ### Switch
 
 A switch input
@@ -85,6 +101,25 @@ A switch input
   options: [
     {
       label: String,     // the label to show on this switch item
+      value: String,     // the value to set on the props when selected
+    }
+  ],
+  initial: String,       // the initial value to set if not configured
+}
+```
+
+### Dropdown
+
+A dropdown menu
+
+```jsx
+{
+  type: 'dropdown',
+  key: String,           // the key on `props` to set this value
+  label: String,         // the label for the text input
+  options: [
+    {
+      label: String,     // the label to show on this item
       value: String,     // the value to set on the props when selected
     }
   ],
@@ -133,5 +168,20 @@ A simple section header to help group fields together
   type: 'section',
   key: String,           // a unique `key` to represent this section
   label: String,         // the label for the section header
+}
+```
+
+### Buttons
+
+Displays one or more buttons that when clicked, execute something in the running app.
+
+```jsx
+{
+  type: 'buttons',
+  key: String,           // a unique `key` for this button
+  label: String,         // the label for the button
+  buttons: [
+    ...{ label: String, onClick: Function },
+  ]
 }
 ```
