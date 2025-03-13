@@ -46,6 +46,8 @@ export class ClientBuilder extends System {
     this.target.rotation.reorder('YXZ')
     this.lastMoveSendTime = 0
 
+    this.undos = []
+
     this.dropTarget = null
     this.file = null
     
@@ -389,6 +391,15 @@ export class ClientBuilder extends System {
       this.world.scene.add(this.gizmos)
     }
     
+    this.control.mouseLeft.onPress = () => {
+      // pointer lock requires user-gesture in safari
+      // so this can't be done during update cycle
+      if (!this.control.pointer.locked) {
+        this.control.pointer.lock()
+        this.justPointerLocked = true
+        return true // capture
+      }
+    }
     this.updateActions()
   }
 
@@ -439,7 +450,7 @@ export class ClientBuilder extends System {
       this.toggle()
     }
     // deselect if dead
-    if (this.selected?.dead) {
+    if (this.selected?.destroyed) {
       this.select(null)
     }
     // deselect if stolen
@@ -475,6 +486,15 @@ export class ClientBuilder extends System {
       }
     }
     
+    // inspect out of pointer-lock
+    if (!this.selected && !this.control.pointer.locked && this.control.mouseRight.pressed) {
+      const entity = this.getEntityAtPointer()
+      if (entity) {
+        this.select(null)
+        this.control.pointer.unlock()
+        this.world.emit('inspect', entity)
+      }
+    }
     // unlink
     if (this.control.keyU.pressed) {
       const entity = this.getEntityAtPointer()
@@ -530,7 +550,15 @@ export class ClientBuilder extends System {
       // Always use pointer position in build mode
       const entity = this.getEntityAtPointer()
         
+    // grab
+    if (!this.justPointerLocked && this.control.pointer.locked && this.control.mouseLeft.pressed && !this.selected) {
+      const entity = this.getEntityAtReticle()
       if (entity?.isApp && !entity.data.pinned) {
+        this.addUndo({
+          name: 'move-entity',
+          entityId: entity.data.id,
+          position: entity.data.position.slice(),
+        })
         this.select(entity)
       }
     }
@@ -539,6 +567,9 @@ export class ClientBuilder extends System {
     else if (this.control.mouseLeft.pressed && this.selected) {
       this.select(null)
     }
+    // duplicate
+    if (!this.justPointerLocked && this.control.pointer.locked && this.control.mouseRight.pressed) {
+      const entity = this.selected || this.getEntityAtReticle()
     
     // duplicate with R key (was right mouse button)
     if (this.control.keyR.pressed) {
@@ -580,6 +611,10 @@ export class ClientBuilder extends System {
         }
         const dup = this.world.entities.add(data, true)
         this.select(dup)
+        this.addUndo({
+          name: 'remove-entity',
+          entityId: data.id,
+        })
       }
     }
     
@@ -588,10 +623,20 @@ export class ClientBuilder extends System {
       const entity = this.selected || this.getEntityAtPointer()
       if (entity?.isApp && !entity.data.pinned) {
         this.select(null)
+        this.addUndo({
+          name: 'add-entity',
+          data: cloneDeep(entity.data),
+        })
         entity?.destroy(true)
       }
     }
     
+    // undo
+    if (this.control.keyZ.pressed && (this.control.metaLeft.down || this.control.controlLeft.down)) {
+      this.undo()
+    }
+    // TODO: move up/down
+    // this.selected.position.y -= this.control.pointer.delta.y * delta * 0.5
     if (this.selected) {
       const app = this.selected
       const hit = this.getHitAtPointer(app, true)
@@ -680,6 +725,7 @@ export class ClientBuilder extends System {
     
     if (!this.enabled) this.select(null)
     this.updateActions()
+    this.world.emit('build-mode', enabled)
     this.world.emit('build-mode', enabled)
   }
 

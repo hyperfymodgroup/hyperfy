@@ -3,7 +3,7 @@ import { isBoolean, isNumber, isString } from 'lodash-es'
 import Yoga from 'yoga-layout'
 
 import { Node } from './Node'
-import { fillRoundRect } from '../extras/fillRoundRect'
+import { fillRoundRect } from '../extras/roundRect'
 import {
   AlignContent,
   AlignItems,
@@ -229,12 +229,7 @@ export class UI extends Node {
       const insetTop = top + inset
       const insetWidth = width - inset * 2
       const insetHeight = height - inset * 2
-      ctx.fillStyle = this._backgroundColor
-      if (this.borderRadius) {
-        fillRoundRect(ctx, insetLeft, insetTop, insetWidth, insetHeight, radius)
-      } else {
-        ctx.fillRect(insetLeft, insetTop, insetWidth, insetHeight)
-      }
+      fillRoundRect(ctx, insetLeft, insetTop, insetWidth, insetHeight, radius, this._backgroundColor)
     }
     if (this._borderWidth && this._borderColor) {
       const radius = this._borderRadius * this._res
@@ -270,7 +265,7 @@ export class UI extends Node {
     this.yogaNode.setAlignItems(AlignItems[this._alignItems])
     this.yogaNode.setAlignContent(AlignContent[this._alignContent])
     this.yogaNode.setFlexWrap(FlexWrap[this._flexWrap])
-    this.yogaNode.setGap(Yoga.GUTTER_ALL, this._gap)
+    this.yogaNode.setGap(Yoga.GUTTER_ALL, this._gap * this._res)
     this.build()
     this.needsRedraw = true
     this.setDirty()
@@ -377,7 +372,7 @@ export class UI extends Node {
       }
       // Check children from front to back
       for (let i = node.children.length - 1; i >= 0; i--) {
-        const childHit = findHitNode(node.children[i], left, top)
+        const childHit = findHitNode(node.children[i], offsetX, offsetY)
         if (childHit) return childHit
       }
       return node
@@ -742,7 +737,7 @@ export class UI extends Node {
     }
     if (this._gap === value) return
     this._gap = value
-    this.yogaNode?.setGap(Yoga.GUTTER_ALL, this._gap)
+    this.yogaNode?.setGap(Yoga.GUTTER_ALL, this._gap * this._res)
     this.redraw()
   }
 

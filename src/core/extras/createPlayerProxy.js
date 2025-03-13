@@ -1,5 +1,5 @@
 import { getRef } from '../nodes/Node'
-import { clamp, uuid } from '../utils'
+import { clamp, hasRole, uuid } from '../utils'
 import * as THREE from './three'
 
 const HEALTH_MAX = 100
@@ -20,6 +20,9 @@ export function createPlayerProxy(player) {
     get userId() {
       return player.data.userId
     },
+    get isAdmin() {
+      return hasRole(player.data.roles, 'admin')
+    },
     get name() {
       return player.data.name
     },
@@ -34,6 +37,12 @@ export function createPlayerProxy(player) {
     },
     get quaternion() {
       return quaternion.copy(player.base.quaternion)
+    },
+    get height() {
+      return player.avatar?.getHeight()
+    },
+    get destroyed() {
+      return !!player.destroyed
     },
     teleport(position, rotationY) {
       if (player.data.owner === world.network.id) {
@@ -66,18 +75,18 @@ export function createPlayerProxy(player) {
     damage(amount) {
       const health = clamp(player.data.health - amount, 0, HEALTH_MAX)
       if (player.data.health === health) return
-      player.modify({ health })
       if (world.network.isServer) {
         world.network.send('entityModified', { id: player.data.id, health })
       }
+      player.modify({ health })
     },
-    heal(amount) {
+    heal(amount = HEALTH_MAX) {
       const health = clamp(player.data.health + amount, 0, HEALTH_MAX)
       if (player.data.health === health) return
-      player.modify({ health })
       if (world.network.isServer) {
         world.network.send('entityModified', { id: player.data.id, health })
       }
+      player.modify({ health })
     },
     hasEffect() {
       return !!player.data.effect
@@ -121,6 +130,20 @@ export function createPlayerProxy(player) {
     },
     cancelEffect() {
       activeEffectConfig?.onEnd()
+    },
+    push(force) {
+      force = force.toArray()
+      // player.applyForce(force)
+      if (player.data.owner === world.network.id) {
+        // if player is local we can set directly
+        player.push(force)
+      } else if (world.network.isClient) {
+        // if we're a client we need to notify server
+        world.network.send('playerPush', { networkId: player.data.owner, force })
+      } else {
+        // if we're the server we need to notify the player
+        world.network.sendTo(player.data.owner, 'playerPush', { force })
+      }
     },
   }
 }
