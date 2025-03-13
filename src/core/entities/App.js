@@ -357,7 +357,34 @@ export class App extends Entity {
     const type = this.blueprint.model.endsWith('vrm') ? 'avatar' : 'model'
     let glb = this.world.loader.get(type, this.blueprint.model)
     if (!glb) return
-    return glb.toNodes()
+    
+    // Create a fresh node tree with current transforms
+    const nodeTree = glb.toNodes()
+    
+    // Copy the actual transform from the root node of the app entity
+    // This ensures we see the current transform values in the inspector
+    if (this.root && nodeTree) {
+      // Copy transforms from the active root to our display tree
+      nodeTree.position.copy(this.root.position);
+      nodeTree.quaternion.copy(this.root.quaternion);
+      nodeTree.scale.copy(this.root.scale);
+      
+      // Mark as transformed so matrices update
+      nodeTree.isTransformed = true;
+      nodeTree.updateTransform();
+      
+      // Also update the parent transforms for every child in the node tree
+      const updateChildTransforms = (node) => {
+        for (const child of node.children) {
+          child.updateTransform();
+          updateChildTransforms(child);
+        }
+      };
+      
+      updateChildTransforms(nodeTree);
+    }
+    
+    return nodeTree;
   }
 
   getPlayerProxy(playerId) {

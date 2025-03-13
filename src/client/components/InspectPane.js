@@ -1,5 +1,6 @@
 import { css } from '@firebolt-dev/css'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import * as THREE from '../../core/extras/three'
 import {
   BoxIcon,
   CircleCheckIcon,
@@ -47,6 +48,30 @@ import {
   InputTextarea,
 } from './Inputs'
 
+// Add this custom scrollbar styling after the imports
+const customScrollbarStyle = `
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    &:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+  }
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) rgba(0, 0, 0, 0.1);
+`;
+
 export function InspectPane({ world, entity }) {
   if (entity.isApp) {
     return <AppPane world={world} app={entity} />
@@ -89,12 +114,6 @@ export function AppPane({ world, app }) {
     } catch (err) {
       console.error(err)
     }
-  }
-
-  // Close handler
-  const handleClose = () => {
-    world.emit('inspect-close')
-    world.emit('inspect', null)
   }
 
   return (
@@ -216,14 +235,14 @@ export function AppPane({ world, app }) {
             <div
               className='apane-head-btn'
               onClick={() => {
-                handleClose()
+                world.emit('inspect', null)
                 app.destroy(true)
               }}
             >
               <Trash2Icon size={16} />
             </div>
           )}
-          <div className='apane-head-btn' onClick={handleClose}>
+          <div className='apane-head-btn' onClick={() => world.emit('inspect', null)}>
             <XIcon size={20} />
           </div>
         </div>
@@ -238,7 +257,7 @@ export function AppPane({ world, app }) {
         </>
       )}
       {tab === 'meta' && <AppPaneMeta world={world} app={app} blueprint={blueprint} />}
-      {tab === 'nodes' && <AppPaneNodes app={app} world={world} />}
+      {tab === 'nodes' && <AppPaneNodes app={app} />}
     </div>
   )
 }
@@ -416,7 +435,7 @@ function AppPaneMain({ world, app, blueprint, canEdit }) {
         <div className='amain-author'>
           <span>by </span>
           {blueprint.url && (
-            <a href={world.resolveURL(blueprint.url)} target='_blank'>
+            <a href={world.resolveURL(blueprint.url)} target='_blank' rel="noreferrer">
               {blueprint.author || 'Unknown'}
             </a>
           )}
@@ -535,97 +554,716 @@ function AppPaneMeta({ world, app, blueprint }) {
   )
 }
 
-function AppPaneNodes({ app, world }) {
+function AppPaneNodes({ app }) {
   const [selectedNode, setSelectedNode] = useState(null)
-  const rootNode = useMemo(() => app.getNodes(), [])
-  const [updateCounter, setUpdateCounter] = useState(0)
-
-  // Set up auto-refresh for the node data
+  const [rootNode, setRootNode] = useState(null)
+  const [expandedNodes, setExpandedNodes] = useState({})
+  const isMountedRef = useRef(true); // Ref to track if component is mounted
+  const appRef = useRef(app); // Ref to keep track of latest app reference
+  const inputTimeoutRef = useRef(null); // Ref to track input timeout
+  const [precisionStep, setPrecisionStep] = useState(0.1); // Default step size for transform inputs
+  
+  // Update the app ref whenever app changes
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      setUpdateCounter(prev => prev + 1);
-    }, 1000); // Refresh every second
-    
-    return () => clearInterval(intervalId);
+    appRef.current = app;
+  }, [app]);
+  
+  // Add a cleanup effect when the component unmounts
+  useEffect(() => {
+    return () => {
+      // Mark as unmounted first to prevent any new callbacks
+      isMountedRef.current = false;
+      
+      // Clean up any references that might be causing memory leaks
+      appRef.current = null;
+      
+      // Clear any pending debounced inputs
+      if (inputTimeoutRef.current !== null) {
+        clearTimeout(inputTimeoutRef.current);
+        inputTimeoutRef.current = null;
+      }
+    };
   }, []);
-
+  
+  // Add a refresh interval to keep the transform data up-to-date
+  useEffect(() => {
+    // Initial load
+    if (app) {
+      try {
+        const initialNode = app.getNodes();
+        setRootNode(initialNode);
+      } catch (err) {
+        console.warn('Error loading initial nodes:', err);
+      }
+    }
+    
+    // Set up an interval to refresh the node data periodically
+    const refreshInterval = setInterval(() => {
+      // Skip if component is unmounted
+      if (!isMountedRef.current) {
+        return;
+      }
+      
+      // Get the current app reference from ref
+      const currentApp = appRef.current;
+      
+      // Improved check that properly handles zero values
+      if (!currentApp || !currentApp.root || 
+          typeof currentApp.root.position === 'undefined' || 
+          typeof currentApp.root.quaternion === 'undefined' || 
+          typeof currentApp.root.scale === 'undefined') {
+        return; // Skip update if app is invalid
+      }
+      
+      if (selectedNode) {
+        // Rather than refreshing the entire tree, just update the transform values
+        // of the selected node when it's the $root node (which is what we're editing)
+        if (selectedNode.id === '$root' && 
+            typeof selectedNode.position !== 'undefined' && 
+            typeof selectedNode.quaternion !== 'undefined' && 
+            typeof selectedNode.scale !== 'undefined') {
+          try {
+            selectedNode.position.copy(currentApp.root.position);
+            selectedNode.quaternion.copy(currentApp.root.quaternion);
+            selectedNode.scale.copy(currentApp.root.scale);
+            selectedNode.isTransformed = true;
+            
+            // Safely call updateTransform if it exists
+            if (typeof selectedNode.updateTransform === 'function') {
+              selectedNode.updateTransform();
+            }
+            
+            // Force a re-render by creating a new reference
+            if (isMountedRef.current) { // Only update state if still mounted
+              setSelectedNode({...selectedNode});
+            }
+          } catch (err) {
+            console.warn('Error updating node transform:', err);
+            // Don't throw error, just skip this update
+          }
+        }
+      }
+    }, 100); // Refresh every 100ms for smooth updates
+    
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [app]);
+  
+  // Mount selected node once the root is available
   useEffect(() => {
     if (rootNode && !selectedNode) {
       setSelectedNode(rootNode)
+      // Auto-expand the root node
+      setExpandedNodes(prev => ({ ...prev, [rootNode.id]: true }))
     }
-  }, [rootNode])
+  }, [rootNode, selectedNode])
 
-  // Helper function to safely get vector string
-  const getVectorString = vec => {
-    if (!vec || typeof vec.x !== 'number') return null
-    return `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`
+  // Modify the updateNodeApp function to handle other nodes too
+  const updateNodeApp = useCallback((node) => {
+    // Skip update if component is unmounted
+    if (!isMountedRef.current) {
+      return;
+    }
+    
+    // Get the current app reference from ref
+    const currentApp = appRef.current;
+    
+    // Improved check that properly handles zero values
+    if (!currentApp || !currentApp.root || typeof currentApp.world === 'undefined') {
+      console.warn('Cannot update node: app is no longer available');
+      return;
+    }
+    
+    if (node.id === '$root') {
+      try {
+        // Instead of directly modifying properties, use the app's native transform functions
+        // which handle both visual updates and physics synchronization
+
+        // Check if the app has a transform function first
+        if (typeof currentApp.setTransform === 'function') {
+          // Use the app's built-in transform function if available
+          currentApp.setTransform({
+            position: node.position.toArray(),
+            quaternion: node.quaternion.toArray(),
+            scale: node.scale.toArray()
+          });
+        } else if (typeof currentApp.setPosition === 'function' && 
+                  typeof currentApp.setRotation === 'function' && 
+                  typeof currentApp.setScale === 'function') {
+          // Try individual transform functions if available
+          currentApp.setPosition(node.position.x, node.position.y, node.position.z);
+          currentApp.setRotation(node.quaternion.x, node.quaternion.y, node.quaternion.z, node.quaternion.w);
+          currentApp.setScale(node.scale.x, node.scale.y, node.scale.z);
+        } else if (typeof currentApp.updateTransform === 'function') {
+          // Try updateTransform if available
+          currentApp.updateTransform({
+            position: node.position,
+            quaternion: node.quaternion,
+            scale: node.scale
+          });
+        } else {
+          // Fallback to direct property assignments and manual physics updates
+          // Update the visual representation (THREE.js objects)
+          currentApp.root.position.copy(node.position);
+          currentApp.root.quaternion.copy(node.quaternion);
+          currentApp.root.scale.copy(node.scale);
+          
+          // Apply matrix updates if available
+          if (currentApp.root.updateMatrix) {
+            currentApp.root.updateMatrix();
+          }
+          if (currentApp.root.updateMatrixWorld) {
+            currentApp.root.updateMatrixWorld(true);
+          }
+
+          // Update any physics bodies and colliders if they exist
+          // This is critical for synchronizing visual and physical representations
+          if (currentApp.colliders && Array.isArray(currentApp.colliders)) {
+            // Update all colliders attached to this app
+            for (const collider of currentApp.colliders) {
+              if (collider && typeof collider.setPosition === 'function') {
+                collider.setPosition(node.position.x, node.position.y, node.position.z);
+              }
+              if (collider && typeof collider.setRotation === 'function') {
+                collider.setRotation(node.quaternion.x, node.quaternion.y, node.quaternion.z, node.quaternion.w);
+              }
+            }
+          }
+          
+          // Also check for a direct rigidbody property
+          if (currentApp.rigidbody) {
+            const rb = currentApp.rigidbody;
+            if (typeof rb.setPosition === 'function') {
+              rb.setPosition(node.position.x, node.position.y, node.position.z);
+            }
+            if (typeof rb.setRotation === 'function') {
+              rb.setRotation(node.quaternion.x, node.quaternion.y, node.quaternion.z, node.quaternion.w);
+            }
+          }
+          
+          // Check for physics property on the root node
+          if (currentApp.root.physics) {
+            const physics = currentApp.root.physics;
+            if (typeof physics.setPosition === 'function') {
+              physics.setPosition(node.position.x, node.position.y, node.position.z);
+            }
+            if (typeof physics.setRotation === 'function') {
+              physics.setRotation(node.quaternion.x, node.quaternion.y, node.quaternion.z, node.quaternion.w);
+            }
+          }
+          
+          // Look for transform node
+          if (currentApp.transform) {
+            const transform = currentApp.transform;
+            if (typeof transform.set === 'function') {
+              transform.set({
+                position: [node.position.x, node.position.y, node.position.z],
+                rotation: [node.quaternion.x, node.quaternion.y, node.quaternion.z, node.quaternion.w],
+                scale: [node.scale.x, node.scale.y, node.scale.z]
+              });
+            }
+          }
+        }
+
+        // Trigger any update callbacks the app might have
+        if (typeof currentApp.onTransformUpdate === 'function') {
+          currentApp.onTransformUpdate();
+        }
+        
+        // Also try to invoke the app script's update method if it exists
+        if (currentApp.script && typeof currentApp.script.onTransformChange === 'function') {
+          currentApp.script.onTransformChange();
+        }
+
+        // For networked instances, send the update to ensure server-side sync
+        if (currentApp.data && currentApp.world && currentApp.world.network) {
+          // Try to use the app's entity system if available
+          if (currentApp.world.entities && 
+              typeof currentApp.world.entities.updateEntityTransform === 'function') {
+            currentApp.world.entities.updateEntityTransform(
+              currentApp.data.id, 
+              node.position.toArray(),
+              node.quaternion.toArray(),
+              node.scale.toArray()
+            );
+          } else {
+            // Fallback to direct network message
+            currentApp.world.network.send('entityModified', { 
+              id: currentApp.data.id, 
+              position: node.position.toArray(),
+              quaternion: node.quaternion.toArray(),
+              scale: node.scale.toArray(),
+              // Add a flag to ensure physics is updated on the server too
+              updatePhysics: true
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Error updating app entity:', err);
+      }
+    } else if (selectedNode && currentApp.root) {
+      // For child nodes, we need to make the change relative to the parent
+      // This is a more complex operation and would require tracking the node's path
+      // in the hierarchy to properly update it
+      
+      // For now, we'll just log that child node editing isn't fully supported
+      console.log('Note: Editing child nodes is view-only. The changes won\'t be saved.');
+    }
+  }, [selectedNode, isMountedRef]);
+
+  // Handle position change
+  const handlePositionChange = useCallback((axis, value) => {
+    // Skip update if component is unmounted
+    if (!isMountedRef.current) {
+      return;
+    }
+    
+    // Get the current app reference from ref
+    const currentApp = appRef.current;
+    
+    if (!selectedNode || !currentApp) return;
+    
+    try {
+      selectedNode.position[axis] = value;
+      selectedNode.isTransformed = true;
+      
+      if (typeof selectedNode.updateTransform === 'function') {
+        selectedNode.updateTransform();
+      }
+      
+      updateNodeApp(selectedNode);
+      
+      // Force a re-render to update the UI
+      if (isMountedRef.current) {
+        setSelectedNode({...selectedNode});
+      }
+    } catch (err) {
+      console.warn('Error updating position:', err);
+    }
+  }, [selectedNode, updateNodeApp, isMountedRef]);
+
+  // Handle rotation change
+  const handleRotationChange = useCallback((axis, value) => {
+    // Skip update if component is unmounted
+    if (!isMountedRef.current) {
+      return;
+    }
+    
+    // Get the current app reference from ref
+    const currentApp = appRef.current;
+    
+    if (!selectedNode || !currentApp) return;
+    
+    try {
+      // Convert degrees to radians for Euler rotation
+      const radians = THREE.MathUtils.degToRad(value);
+      selectedNode.rotation[axis] = radians;
+      
+      // This will automatically update the quaternion via the _onChange handlers
+      selectedNode.isTransformed = true;
+      
+      if (typeof selectedNode.updateTransform === 'function') {
+        selectedNode.updateTransform();
+      }
+      
+      updateNodeApp(selectedNode);
+      
+      // Force a re-render to update the UI
+      if (isMountedRef.current) {
+        setSelectedNode({...selectedNode});
+      }
+    } catch (err) {
+      console.warn('Error updating rotation:', err);
+    }
+  }, [selectedNode, updateNodeApp, isMountedRef]);
+
+  // Handle scale change
+  const handleScaleChange = useCallback((axis, value) => {
+    // Skip update if component is unmounted
+    if (!isMountedRef.current) {
+      return;
+    }
+    
+    // Get the current app reference from ref
+    const currentApp = appRef.current;
+    
+    if (!selectedNode || !currentApp) return;
+    
+    try {
+      selectedNode.scale[axis] = value;
+      selectedNode.isTransformed = true;
+      
+      if (typeof selectedNode.updateTransform === 'function') {
+        selectedNode.updateTransform();
+      }
+      
+      updateNodeApp(selectedNode);
+      
+      // Force a re-render to update the UI
+      if (isMountedRef.current) {
+        setSelectedNode({...selectedNode});
+      }
+    } catch (err) {
+      console.warn('Error updating scale:', err);
+    }
+  }, [selectedNode, updateNodeApp, isMountedRef]);
+
+  // Toggle node expansion
+  const toggleNode = (nodeId, e) => {
+    e.stopPropagation()
+    setExpandedNodes(prev => ({
+      ...prev,
+      [nodeId]: !prev[nodeId]
+    }))
   }
 
-  // Helper function to get vector components for editable fields
-  const getVectorComponents = vec => {
-    if (!vec || typeof vec.x !== 'number') return { x: 0, y: 0, z: 0 }
-    return { 
-      x: parseFloat(vec.x.toFixed(3)), 
-      y: parseFloat(vec.y.toFixed(3)), 
-      z: parseFloat(vec.z.toFixed(3))
+  // Helper function to safely extract vector values (works with THREE.Vector3 and plain objects)
+  const extractVectorComponents = vec => {
+    if (!vec) return null
+    
+    // Handle THREE.Vector3-like objects
+    if (typeof vec.x === 'number' && typeof vec.y === 'number' && typeof vec.z === 'number') {
+      return { x: vec.x, y: vec.y, z: vec.z }
     }
+    
+    // Handle array-like structures [x, y, z]
+    if (Array.isArray(vec) && vec.length >= 3) {
+      return { x: vec[0], y: vec[1], z: vec[2] }
+    }
+    
+    // Handle objects with toArray() method
+    if (typeof vec.toArray === 'function') {
+      try {
+        const arr = vec.toArray()
+        if (arr && arr.length >= 3) {
+          return { x: arr[0], y: arr[1], z: arr[2] }
+        }
+      } catch (err) {
+        console.warn('Error calling toArray()', err)
+      }
+    }
+    
+    // Handle Euler angles - convert to degrees for display
+    if (vec.isEuler) {
+      return { 
+        x: (THREE.MathUtils.radToDeg(vec.x) || 0).toFixed(1) + '°', 
+        y: (THREE.MathUtils.radToDeg(vec.y) || 0).toFixed(1) + '°', 
+        z: (THREE.MathUtils.radToDeg(vec.z) || 0).toFixed(1) + '°' 
+      }
+    }
+    
+    // Special case for matrices
+    if (vec.isMatrix4) {
+      const pos = new THREE.Vector3()
+      const quat = new THREE.Quaternion()
+      const scale = new THREE.Vector3()
+      vec.decompose(pos, quat, scale)
+      return { x: pos.x, y: pos.y, z: pos.z }
+    }
+    
+    // Try to access internal elements or elements property (some THREE objects structure)
+    if (vec.elements && Array.isArray(vec.elements) && vec.elements.length >= 3) {
+      return { x: vec.elements[0], y: vec.elements[1], z: vec.elements[2] }
+    }
+    
+    return null
   }
 
-  // Helper function to safely check if a property exists
+  // Check if a property exists and is valid
   const hasProperty = (obj, prop) => {
     try {
-      return obj && typeof obj[prop] !== 'undefined'
+      return obj && (typeof obj[prop] !== 'undefined' && obj[prop] !== null)
     } catch (err) {
       return false
     }
   }
 
-  // Function to update node properties
-  const updateNodeProperty = (property, component, value) => {
-    if (!selectedNode || !hasProperty(selectedNode, property)) return
-    
-    // Safely update the property
-    try {
-      // Convert string input to number
-      const numValue = parseFloat(value)
-      if (isNaN(numValue)) return
-
-      // Update the component (x, y, or z)
-      selectedNode[property][component] = numValue
-      
-      // For nodes with matrix updates
-      if (typeof selectedNode.clean === 'function') {
-        selectedNode.clean()
-      }
-      
-      // Trigger a re-render
-      setUpdateCounter(prev => prev + 1)
-      
-      // If this is an app's root node, update app entity position in network
-      if (app.root === selectedNode) {
-        const updateData = {
-          id: app.data.id
-        };
-        
-        if (property === 'position') {
-          updateData.position = selectedNode.position.toArray();
-        } else if (property === 'rotation') {
-          updateData.quaternion = selectedNode.quaternion.toArray();
-        } else if (property === 'scale') {
-          updateData.scale = selectedNode.scale.toArray();
-        }
-        
-        // Send update to network
-        world.network.send('entityModified', updateData);
-        
-        // Update gizmo position if available
-        if (world.builder && world.builder.updateHighlight) {
-          world.builder.updateHighlight();
-        }
-      }
-    } catch (err) {
-      console.error('Failed to update property:', err)
+  // Modify safeChangeHandler to use debouncing and more robust checking
+  const safeChangeHandler = (axis, value, onChangeVec) => {
+    // Clear any previous pending updates for this axis
+    if (inputTimeoutRef.current !== null) {
+      clearTimeout(inputTimeoutRef.current);
     }
+    
+    // Debounce the input changes to prevent rapid successive updates
+    inputTimeoutRef.current = setTimeout(() => {
+      // Reset the timeout ref
+      inputTimeoutRef.current = null;
+      
+      // Double-check if component is still mounted
+      if (!isMountedRef.current) {
+        console.warn('Cannot update: component is unmounted');
+        return;
+      }
+      
+      // Capture the current app reference at the time of the callback
+      const currentApp = appRef.current;
+      
+      if (!currentApp) {
+        console.warn('Cannot update: app reference is null');
+        return;
+      }
+      
+      // More careful checks for property existence
+      if (typeof currentApp.root === 'undefined') {
+        console.warn('Cannot update: app.root is undefined');
+        return;
+      }
+      
+      if (typeof currentApp.world === 'undefined') {
+        console.warn('Cannot update: app.world is undefined');
+        return;
+      }
+      
+      try {
+        // Only call the original handler if it's safe to do so and it's a function
+        if (typeof onChangeVec === 'function') {
+          onChangeVec(axis, value);
+        }
+      } catch (err) {
+        console.warn(`Error updating ${axis}:`, err);
+      }
+    }, 50); // 50ms debounce delay
+  };
+  
+  // Add this utility function to increment/decrement values with precision
+  const adjustValue = useCallback((value, increment, step) => {
+    // Parse the value to ensure it's a number
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) return 0;
+    
+    // Calculate new value with the precision step
+    const newValue = increment ? numValue + step : numValue - step;
+    
+    // Return formatted to avoid floating point precision issues
+    const precision = Math.max(0, Math.ceil(Math.log10(1 / step)));
+    return parseFloat(newValue.toFixed(precision));
+  }, []);
+
+  // Create a function to cycle through precision steps
+  const cyclePrecision = useCallback(() => {
+    // Define available precision steps
+    const steps = [1, 0.1, 0.01, 0.001];
+    const currentIndex = steps.indexOf(precisionStep);
+    const nextIndex = (currentIndex + 1) % steps.length;
+    setPrecisionStep(steps[nextIndex]);
+  }, [precisionStep]);
+
+  // Update the formatVector function with the new controls
+  const formatVector = (vec, onChangeVec, isChildNode = false) => {
+    const components = extractVectorComponents(vec)
+    if (!components) return 'None'
+    
+    // If this is a child node and we have an onChangeVec function,
+    // we'll show the inputs but disable them
+    const showInputs = onChangeVec !== null;
+    const disableInputs = isChildNode && showInputs;
+    
+    return (
+      <div className="vector-value">
+        <span style={{ color: '#ff6b6b', display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ width: '20px', display: 'inline-block' }}>X:</span>
+          {showInputs ? (
+            <div className="transform-input-wrapper">
+              <button 
+                className="transform-button minus"
+                onClick={() => safeChangeHandler('x', adjustValue(components.x, false, precisionStep), onChangeVec)}
+                disabled={disableInputs}
+              >
+                -
+              </button>
+              <input 
+                type="number" 
+                value={typeof components.x === 'string' ? parseFloat(components.x) : components.x} 
+                onChange={(e) => safeChangeHandler('x', parseFloat(e.target.value), onChangeVec)}
+                disabled={disableInputs}
+                className={disableInputs ? "transform-input disabled" : "transform-input"}
+                step={precisionStep}
+              />
+              <button 
+                className="transform-button plus"
+                onClick={() => safeChangeHandler('x', adjustValue(components.x, true, precisionStep), onChangeVec)}
+                disabled={disableInputs}
+              >
+                +
+              </button>
+            </div>
+          ) : (
+            <span style={{ marginLeft: '5px' }}>
+              {typeof components.x === 'string' ? components.x : Number(components.x).toFixed(3)}
+            </span>
+          )}
+        </span>
+        <span style={{ color: '#51cf66', display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ width: '20px', display: 'inline-block' }}>Y:</span>
+          {showInputs ? (
+            <div className="transform-input-wrapper">
+              <button 
+                className="transform-button minus"
+                onClick={() => safeChangeHandler('y', adjustValue(components.y, false, precisionStep), onChangeVec)}
+                disabled={disableInputs}
+              >
+                -
+              </button>
+              <input 
+                type="number" 
+                value={typeof components.y === 'string' ? parseFloat(components.y) : components.y} 
+                onChange={(e) => safeChangeHandler('y', parseFloat(e.target.value), onChangeVec)}
+                disabled={disableInputs}
+                className={disableInputs ? "transform-input disabled" : "transform-input"}
+                step={precisionStep}
+              />
+              <button 
+                className="transform-button plus"
+                onClick={() => safeChangeHandler('y', adjustValue(components.y, true, precisionStep), onChangeVec)}
+                disabled={disableInputs}
+              >
+                +
+              </button>
+            </div>
+          ) : (
+            <span style={{ marginLeft: '5px' }}>
+              {typeof components.y === 'string' ? components.y : Number(components.y).toFixed(3)}
+            </span>
+          )}
+        </span>
+        <span style={{ color: '#339af0', display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ width: '20px', display: 'inline-block' }}>Z:</span>
+          {showInputs ? (
+            <div className="transform-input-wrapper">
+              <button 
+                className="transform-button minus"
+                onClick={() => safeChangeHandler('z', adjustValue(components.z, false, precisionStep), onChangeVec)}
+                disabled={disableInputs}
+              >
+                -
+              </button>
+              <input 
+                type="number" 
+                value={typeof components.z === 'string' ? parseFloat(components.z) : components.z} 
+                onChange={(e) => safeChangeHandler('z', parseFloat(e.target.value), onChangeVec)}
+                disabled={disableInputs}
+                className={disableInputs ? "transform-input disabled" : "transform-input"}
+                step={precisionStep}
+              />
+              <button 
+                className="transform-button plus"
+                onClick={() => safeChangeHandler('z', adjustValue(components.z, true, precisionStep), onChangeVec)}
+                disabled={disableInputs}
+              >
+                +
+              </button>
+            </div>
+          ) : (
+            <span style={{ marginLeft: '5px' }}>
+              {typeof components.z === 'string' ? components.z : Number(components.z).toFixed(3)}
+            </span>
+          )}
+        </span>
+        
+        {/* Add precision step control */}
+        {showInputs && !disableInputs && (
+          <div className="precision-control">
+            <button 
+              className="precision-button" 
+              onClick={cyclePrecision} 
+              title="Change precision"
+            >
+              Step: {precisionStep}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Helper function to format color values
+  const formatColor = color => {
+    if (!color) return 'None'
+    if (color.getHexString) {
+      const hex = `#${color.getHexString()}`
+      return (
+        <div className="color-value" style={{ display: 'flex', alignItems: 'center' }}>
+          <div 
+            style={{ 
+              width: 16, 
+              height: 16, 
+              backgroundColor: hex, 
+              marginRight: 8,
+              borderRadius: 3,
+              border: '1px solid rgba(255,255,255,0.2)'
+            }} 
+          />
+          <span>{hex}</span>
+        </div>
+      )
+    }
+    return 'Unknown'
+  }
+
+  // Get the appropriate display value for rotation
+  const getRotationValue = (node, wantEditableVector) => {
+    // Try different possible rotation representations
+    if (hasProperty(node, 'rotation')) {
+      if (node.rotation.isEuler) {
+        // For editable values, we need to convert to degrees
+        if (wantEditableVector) {
+          return new THREE.Vector3(
+            THREE.MathUtils.radToDeg(node.rotation.x),
+            THREE.MathUtils.radToDeg(node.rotation.y),
+            THREE.MathUtils.radToDeg(node.rotation.z)
+          );
+        }
+        return formatVector(node.rotation, null)
+      } else {
+        // Create a new Euler if the rotation isn't already one
+        try {
+          const euler = new THREE.Euler()
+          if (Array.isArray(node.rotation) && node.rotation.length >= 3) {
+            euler.set(node.rotation[0], node.rotation[1], node.rotation[2])
+          } else if (typeof node.rotation.x === 'number') {
+            euler.set(node.rotation.x, node.rotation.y, node.rotation.z)
+          }
+          // For editable values, we need to convert to degrees
+          if (wantEditableVector) {
+            return new THREE.Vector3(
+              THREE.MathUtils.radToDeg(euler.x),
+              THREE.MathUtils.radToDeg(euler.y),
+              THREE.MathUtils.radToDeg(euler.z)
+            );
+          }
+          return formatVector(euler, null)
+        } catch (err) {
+          console.warn('Error converting rotation', err)
+          return formatVector(node.rotation, null)
+        }
+      }
+    } else if (hasProperty(node, 'quaternion')) {
+      // Convert quaternion to euler angles for display
+      try {
+        const euler = new THREE.Euler().setFromQuaternion(
+          typeof node.quaternion.x === 'number' 
+            ? node.quaternion  // Direct quaternion object
+            : Array.isArray(node.quaternion) && node.quaternion.length >= 4 
+              ? new THREE.Quaternion(node.quaternion[0], node.quaternion[1], node.quaternion[2], node.quaternion[3]) 
+              : new THREE.Quaternion() // Default empty quaternion
+        )
+        // For editable values, we need to convert to degrees
+        if (wantEditableVector) {
+          return new THREE.Vector3(
+            THREE.MathUtils.radToDeg(euler.x),
+            THREE.MathUtils.radToDeg(euler.y),
+            THREE.MathUtils.radToDeg(euler.z)
+          );
+        }
+        return formatVector(euler, null)
+      } catch (err) {
+        console.warn('Error converting quaternion', err)
+        return "Error converting quaternion"
+      }
+    }
+    return 'None'
   }
 
   return (
@@ -643,25 +1281,47 @@ function AppPaneNodes({ app, world }) {
           overflow-y: auto;
           margin-bottom: 20px;
           padding-right: 10px;
+          ${customScrollbarStyle}
         }
         .anodes-item {
           display: flex;
           align-items: center;
-          padding: 4px 6px;
+          padding: 6px 8px;
           border-radius: 10px;
           font-size: 14px;
           cursor: pointer;
+          margin-bottom: 2px;
+          transition: background 0.15s ease, color 0.15s ease;
           &:hover {
-            color: #00a7ff;
+            background: rgba(0, 167, 255, 0.05);
           }
           &.selected {
             color: #00a7ff;
             background: rgba(0, 167, 255, 0.1);
           }
-          svg {
+          .icon-container {
+            display: flex;
+            align-items: center;
             margin-right: 8px;
+            opacity: 0.7;
+          }
+          .chevron {
+            cursor: pointer;
             opacity: 0.5;
-            flex-shrink: 0;
+            margin-right: 5px;
+            transition: transform 0.15s ease;
+            &.expanded {
+              transform: rotate(90deg);
+            }
+            &:hover {
+              opacity: 1;
+            }
+          }
+          .node-type {
+            margin-left: 5px;
+            font-size: 11px;
+            opacity: 0.5;
+            font-style: italic;
           }
           span {
             white-space: nowrap;
@@ -684,6 +1344,7 @@ function AppPaneNodes({ app, world }) {
           max-height: 40vh;
           overflow-y: auto;
           padding-right: 10px;
+          ${customScrollbarStyle}
         }
         .anodes-detail {
           display: flex;
@@ -699,83 +1360,150 @@ function AppPaneNodes({ app, world }) {
             word-break: break-word;
             &.copy {
               cursor: pointer;
+              transition: color 0.15s ease;
+              &:hover {
+                color: #00a7ff;
+              }
             }
           }
-          &-inputs {
-            display: flex;
-            flex: 1;
-            gap: 5px;
+        }
+        .vector-value {
+          display: flex;
+          flex-direction: column;
+          span {
+            margin-bottom: 3px;
           }
-          &-input-group {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            position: relative;
+        }
+        .property-section {
+          margin-top: 16px;
+          margin-bottom: 12px;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: rgba(255, 255, 255, 0.3);
+          padding-bottom: 4px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .transform-input-wrapper {
+          position: relative;
+          flex: 1;
+          margin-left: 5px;
+          display: flex;
+          align-items: center;
+        }
+        .transform-input {
+          flex: 1;
+          background: rgba(40, 40, 50, 0.8);
+          color: white;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 6px;
+          padding: 6px 8px;
+          font-size: 13px;
+          transition: all 0.2s ease;
+          text-align: center;
+          &:hover {
+            border-color: rgba(255, 255, 255, 0.3);
           }
-          &-input {
-            flex: 1;
-            width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+          &:focus {
+            outline: none;
+            border-color: #00a7ff;
+            box-shadow: 0 0 0 2px rgba(0, 167, 255, 0.2);
+          }
+          &.disabled {
+            background: rgba(20, 20, 25, 0.8);
+            color: rgba(255, 255, 255, 0.5);
+            cursor: not-allowed;
+          }
+          /* Hide browser arrows */
+          &::-webkit-inner-spin-button, 
+          &::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+          }
+          -moz-appearance: textfield; /* Firefox */
+        }
+        .transform-button {
+          width: 28px;
+          height: 28px;
+          background: rgba(30, 30, 40, 0.9);
+          color: rgba(255, 255, 255, 0.8);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 16px;
+          font-weight: bold;
+          transition: all 0.15s ease;
+          margin: 0 4px;
+          flex-shrink: 0;
+          
+          &:hover {
+            background: rgba(50, 50, 60, 0.9);
             color: white;
+            border-color: rgba(255, 255, 255, 0.3);
+          }
+          
+          &:active {
+            background: rgba(0, 167, 255, 0.3);
+            transform: scale(0.95);
+          }
+          
+          &.minus {
+            margin-left: 0;
+          }
+          
+          &.plus {
+            margin-right: 0;
+          }
+          
+          &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            &:hover, &:active {
+              background: rgba(30, 30, 40, 0.9);
+              color: rgba(255, 255, 255, 0.8);
+              border-color: rgba(255, 255, 255, 0.15);
+              transform: none;
+            }
+          }
+        }
+        .precision-control {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 8px;
+          
+          .precision-button {
+            background: rgba(30, 30, 40, 0.7);
+            color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 4px;
-            padding: 3px 18px;
-            font-size: 13px;
-            text-align: center;
-            font-family: monospace;
-            &:focus {
-              outline: none;
-              border-color: #00a7ff;
-              background: rgba(0, 167, 255, 0.1);
-            }
-            &.x {
-              border-top: 2px solid #ff4d4d;
-            }
-            &.y {
-              border-top: 2px solid #4dff4d;
-            }
-            &.z {
-              border-top: 2px solid #4d4dff;
-            }
-          }
-          &-btn {
-            position: absolute;
-            width: 18px;
-            height: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.5);
+            padding: 4px 8px;
+            font-size: 11px;
             cursor: pointer;
+            transition: all 0.15s ease;
+            
             &:hover {
+              background: rgba(40, 40, 50, 0.8);
               color: white;
-              background: rgba(255, 255, 255, 0.1);
+              border-color: rgba(255, 255, 255, 0.2);
             }
-            &.up {
-              top: 0;
-              right: 0;
-              border-top-right-radius: 4px;
-            }
-            &.down {
-              bottom: 0;
-              right: 0;
-              border-bottom-right-radius: 4px;
+            
+            &:active {
+              background: rgba(0, 167, 255, 0.2);
             }
           }
-          &-component-label {
-            margin-top: 2px;
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.5);
-            text-transform: uppercase;
-          }
+        }
+        /* Style for amain scrollable area */
+        .amain.noscrollbar, .ameta.noscrollbar {
+          ${customScrollbarStyle}
         }
       `}
     >
       <div className='anodes-tree'>
         {rootNode ? (
-          renderHierarchy([rootNode], 0, selectedNode, setSelectedNode)
+          renderHierarchy(rootNode, 0, selectedNode, setSelectedNode, expandedNodes, toggleNode)
         ) : (
           <div className='anodes-empty'>
             <LayersIcon size={24} />
@@ -786,49 +1514,135 @@ function AppPaneNodes({ app, world }) {
 
       {selectedNode && (
         <div className='anodes-details'>
+          {selectedNode.id === '$root' && (
+            <div style={{ 
+              padding: '8px 12px', 
+              background: 'rgba(0, 167, 255, 0.1)', 
+              borderRadius: '5px', 
+              marginBottom: '15px',
+              fontSize: '12px',
+              lineHeight: '1.4'
+            }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>✓ Root node is fully editable</div>
+              <div>Transform changes will be applied directly to the app and automatically saved.</div>
+            </div>
+          )}
+          
+          {selectedNode.id !== '$root' && (
+            <div style={{ 
+              padding: '8px 12px', 
+              background: 'rgba(255, 167, 0, 0.1)', 
+              borderRadius: '5px', 
+              marginBottom: '15px',
+              fontSize: '12px',
+              lineHeight: '1.4'
+            }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>⚠️ Child node editing is view-only</div>
+              <div>Changes to child nodes won't be saved as they're part of the model structure.</div>
+            </div>
+          )}
+          
+          <div className="property-section">Identity</div>
           <HierarchyDetail label='ID' value={selectedNode.id} copy />
-          <HierarchyDetail label='Name' value={selectedNode.name} />
-
-          {/* Position - Editable */}
+          <HierarchyDetail label='Type' value={selectedNode.name || 'Unknown'} />
+          
+          {/* Transform section */}
+          {(hasProperty(selectedNode, 'position') || 
+            hasProperty(selectedNode, 'rotation') || 
+            hasProperty(selectedNode, 'quaternion') || 
+            hasProperty(selectedNode, 'scale')) && (
+            <div className="property-section">Transform</div>
+          )}
+          
+          {/* Position */}
           {hasProperty(selectedNode, 'position') && (
-            <HierarchyDetailVector 
+            <HierarchyDetail 
               label='Position' 
-              vector={getVectorComponents(selectedNode.position)} 
-              onChange={(component, value) => updateNodeProperty('position', component, value)}
+              value={formatVector(
+                selectedNode.position, 
+                selectedNode.id === '$root' ? handlePositionChange : null,
+                selectedNode.id !== '$root'
+              )} 
+              isComponent 
             />
           )}
 
-          {/* Rotation - Editable */}
-          {hasProperty(selectedNode, 'rotation') && (
-            <HierarchyDetailVector 
+          {/* Rotation - handle both euler and quaternion */}
+          {(hasProperty(selectedNode, 'rotation') || hasProperty(selectedNode, 'quaternion')) && (
+            <HierarchyDetail 
               label='Rotation' 
-              vector={getVectorComponents(selectedNode.rotation)} 
-              onChange={(component, value) => updateNodeProperty('rotation', component, value)}
-              isDegrees={true}
+              value={formatVector(
+                getRotationValue(selectedNode, true), 
+                selectedNode.id === '$root' ? handleRotationChange : null,
+                selectedNode.id !== '$root'
+              )} 
+              isComponent 
             />
           )}
 
-          {/* Scale - Editable */}
+          {/* Scale */}
           {hasProperty(selectedNode, 'scale') && (
-            <HierarchyDetailVector 
+            <HierarchyDetail 
               label='Scale' 
-              vector={getVectorComponents(selectedNode.scale)} 
-              onChange={(component, value) => updateNodeProperty('scale', component, value)}
+              value={formatVector(
+                selectedNode.scale, 
+                selectedNode.id === '$root' ? handleScaleChange : null,
+                selectedNode.id !== '$root'
+              )} 
+              isComponent 
             />
           )}
 
-          {/* Material */}
+          {/* Material properties */}
           {hasProperty(selectedNode, 'material') && selectedNode.material && (
             <>
-              <HierarchyDetail label='Material' value={selectedNode.material.type || 'Standard'} />
-              {hasProperty(selectedNode.material, 'color') && selectedNode.material.color && (
-                <HierarchyDetail
-                  label='Color'
-                  value={
-                    selectedNode.material.color.getHexString
-                      ? `#${selectedNode.material.color.getHexString()}`
-                      : 'Unknown'
-                  }
+              <div className="property-section">Material</div>
+              <HierarchyDetail 
+                label='Type' 
+                value={selectedNode.material.type || 'Standard'} 
+              />
+              
+              {hasProperty(selectedNode.material, 'color') && (
+                <HierarchyDetail 
+                  label='Color' 
+                  value={formatColor(selectedNode.material.color)} 
+                  isComponent 
+                />
+              )}
+              
+              {hasProperty(selectedNode.material, 'emissive') && (
+                <HierarchyDetail 
+                  label='Emissive' 
+                  value={formatColor(selectedNode.material.emissive)} 
+                  isComponent 
+                />
+              )}
+              
+              {hasProperty(selectedNode.material, 'metalness') && (
+                <HierarchyDetail 
+                  label='Metalness' 
+                  value={selectedNode.material.metalness.toFixed(2)} 
+                />
+              )}
+              
+              {hasProperty(selectedNode.material, 'roughness') && (
+                <HierarchyDetail 
+                  label='Roughness' 
+                  value={selectedNode.material.roughness.toFixed(2)} 
+                />
+              )}
+              
+              {hasProperty(selectedNode.material, 'transparent') && (
+                <HierarchyDetail 
+                  label='Transparent' 
+                  value={selectedNode.material.transparent ? 'Yes' : 'No'} 
+                />
+              )}
+              
+              {hasProperty(selectedNode.material, 'opacity') && selectedNode.material.transparent && (
+                <HierarchyDetail 
+                  label='Opacity' 
+                  value={selectedNode.material.opacity.toFixed(2)} 
                 />
               )}
             </>
@@ -836,7 +1650,69 @@ function AppPaneNodes({ app, world }) {
 
           {/* Geometry */}
           {hasProperty(selectedNode, 'geometry') && selectedNode.geometry && (
-            <HierarchyDetail label='Geometry' value={selectedNode.geometry.type || 'Custom'} />
+            <>
+              <div className="property-section">Geometry</div>
+              <HierarchyDetail 
+                label='Type' 
+                value={selectedNode.geometry.type || 'Custom'} 
+              />
+              
+              {hasProperty(selectedNode.geometry, 'parameters') && (
+                <HierarchyDetail 
+                  label='Parameters' 
+                  value={
+                    Object.entries(selectedNode.geometry.parameters || {})
+                      .map(([key, value]) => `${key}: ${typeof value === 'number' ? value.toFixed(2) : value}`)
+                      .join(', ') || 'None'
+                  } 
+                />
+              )}
+            </>
+          )}
+          
+          {/* Other common properties */}
+          {(hasProperty(selectedNode, 'visible') || 
+            hasProperty(selectedNode, 'castShadow') || 
+            hasProperty(selectedNode, 'receiveShadow')) && (
+            <div className="property-section">Rendering</div>
+          )}
+          
+          {hasProperty(selectedNode, 'visible') && (
+            <HierarchyDetail 
+              label='Visible' 
+              value={selectedNode.visible === false ? 'No' : 'Yes'} 
+            />
+          )}
+          
+          {hasProperty(selectedNode, 'castShadow') && (
+            <HierarchyDetail 
+              label='Cast Shadow' 
+              value={selectedNode.castShadow ? 'Yes' : 'No'} 
+            />
+          )}
+          
+          {hasProperty(selectedNode, 'receiveShadow') && (
+            <HierarchyDetail 
+              label='Receive Shadow' 
+              value={selectedNode.receiveShadow ? 'Yes' : 'No'} 
+            />
+          )}
+
+          {hasProperty(selectedNode, 'url') && (
+            <HierarchyDetail 
+              label='URL' 
+              value={
+                <a 
+                  href={selectedNode.url} 
+                  target="_blank" 
+                  rel="noreferrer"
+                  style={{color: '#339af0', textDecoration: 'underline'}}
+                >
+                  {selectedNode.url}
+                </a>
+              } 
+              isComponent 
+            />
           )}
         </div>
       )}
@@ -844,149 +1720,13 @@ function AppPaneNodes({ app, world }) {
   )
 }
 
-function HierarchyDetail({ label, value, copy }) {
+function HierarchyDetail({ label, value, copy, isComponent }) {
   let handleCopy = copy ? () => navigator.clipboard.writeText(value) : null
   return (
     <div className='anodes-detail'>
       <div className='anodes-detail-label'>{label}</div>
-      <div className={cls('anodes-detail-value', { copy })} onClick={handleCopy}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function HierarchyDetailVector({ label, vector, onChange, isDegrees = false }) {
-  // Store local state to avoid flickering during edits
-  const [localValues, setLocalValues] = useState({
-    x: isDegrees ? (vector.x * 180 / Math.PI).toFixed(1) : vector.x.toFixed(3),
-    y: isDegrees ? (vector.y * 180 / Math.PI).toFixed(1) : vector.y.toFixed(3),
-    z: isDegrees ? (vector.z * 180 / Math.PI).toFixed(1) : vector.z.toFixed(3)
-  });
-  
-  // Update local values when the vector changes (from external sources)
-  useEffect(() => {
-    setLocalValues({
-      x: isDegrees ? (vector.x * 180 / Math.PI).toFixed(1) : vector.x.toFixed(3),
-      y: isDegrees ? (vector.y * 180 / Math.PI).toFixed(1) : vector.y.toFixed(3),
-      z: isDegrees ? (vector.z * 180 / Math.PI).toFixed(1) : vector.z.toFixed(3)
-    });
-  }, [vector, isDegrees]);
-
-  const handleInputChange = (component, value) => {
-    // Update local input state immediately for responsive UI
-    setLocalValues(prev => ({
-      ...prev,
-      [component]: value
-    }));
-  };
-
-  const handleBlur = (component, value) => {
-    // Parse as number
-    let numValue = parseFloat(value);
-    
-    // Validate
-    if (isNaN(numValue)) {
-      // Reset to original value if invalid
-      setLocalValues(prev => ({
-        ...prev,
-        [component]: isDegrees 
-          ? (vector[component] * 180 / Math.PI).toFixed(1) 
-          : vector[component].toFixed(3)
-      }));
-      return;
-    }
-    
-    // Snap rotation values to nearest 5 degrees
-    if (isDegrees) {
-      numValue = Math.round(numValue / 5) * 5;
-      setLocalValues(prev => ({
-        ...prev,
-        [component]: numValue.toFixed(1)
-      }));
-      
-      // Convert to radians for the actual change
-      numValue = numValue * Math.PI / 180;
-    }
-    
-    // Commit the change
-    onChange(component, numValue);
-  };
-
-  const handleKeyDown = (e, component, value) => {
-    if (e.key === 'Enter') {
-      e.target.blur(); // Trigger blur to apply the value
-    }
-  };
-  
-  const handleIncrement = (component, amount) => {
-    const currentValue = parseFloat(localValues[component]);
-    if (isNaN(currentValue)) return;
-    
-    // Calculate the increment amount based on the type of value
-    const increment = isDegrees ? 5 : (label === 'Scale' ? 0.1 : 0.25);
-    const newValue = (currentValue + (increment * amount)).toFixed(isDegrees ? 1 : 3);
-    
-    // Update the local UI immediately
-    setLocalValues(prev => ({
-      ...prev,
-      [component]: newValue
-    }));
-    
-    // Apply the value
-    let finalValue = parseFloat(newValue);
-    if (isDegrees) {
-      finalValue = finalValue * Math.PI / 180;
-    }
-    
-    onChange(component, finalValue);
-  };
-
-  return (
-    <div className='anodes-detail'>
-      <div className='anodes-detail-label'>{label}</div>
-      <div className='anodes-detail-inputs'>
-        <div className='anodes-detail-input-group'>
-          <input 
-            type="text" 
-            className="anodes-detail-input x" 
-            value={localValues.x} 
-            onChange={(e) => handleInputChange('x', e.target.value)}
-            onBlur={(e) => handleBlur('x', e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, 'x', e.target.value)}
-          />
-          <div className="anodes-detail-btn up" onClick={() => handleIncrement('x', 1)}>+</div>
-          <div className="anodes-detail-btn down" onClick={() => handleIncrement('x', -1)}>-</div>
-          <div className="anodes-detail-component-label">X</div>
-        </div>
-        
-        <div className='anodes-detail-input-group'>
-          <input 
-            type="text" 
-            className="anodes-detail-input y" 
-            value={localValues.y} 
-            onChange={(e) => handleInputChange('y', e.target.value)}
-            onBlur={(e) => handleBlur('y', e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, 'y', e.target.value)}
-          />
-          <div className="anodes-detail-btn up" onClick={() => handleIncrement('y', 1)}>+</div>
-          <div className="anodes-detail-btn down" onClick={() => handleIncrement('y', -1)}>-</div>
-          <div className="anodes-detail-component-label">Y</div>
-        </div>
-        
-        <div className='anodes-detail-input-group'>
-          <input 
-            type="text" 
-            className="anodes-detail-input z" 
-            value={localValues.z} 
-            onChange={(e) => handleInputChange('z', e.target.value)}
-            onBlur={(e) => handleBlur('z', e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, 'z', e.target.value)}
-          />
-          <div className="anodes-detail-btn up" onClick={() => handleIncrement('z', 1)}>+</div>
-          <div className="anodes-detail-btn down" onClick={() => handleIncrement('z', -1)}>-</div>
-          <div className="anodes-detail-component-label">Z</div>
-        </div>
+      <div className={cls('anodes-detail-value', { copy })}>
+        {isComponent ? value : (typeof value === 'string' ? value : JSON.stringify(value))}
       </div>
     </div>
   )
@@ -1001,42 +1741,63 @@ const nodeIcons = {
   lod: EyeIcon,
   avatar: PersonStandingIcon,
   snap: MagnetIcon,
+  audio: AtomIcon,
+  action: ZapIcon,
+  ui: LayersIcon,
+  uitext: FileIcon,
+  uiimage: FileIcon,
 }
 
-function renderHierarchy(nodes, depth = 0, selectedNode, setSelectedNode) {
-  if (!Array.isArray(nodes)) return null
+function renderHierarchy(node, depth = 0, selectedNode, setSelectedNode, expandedNodes, toggleNode) {
+  if (!node) return null
 
-  return nodes.map(node => {
-    if (!node) return null
+  // Get Icon component based on node type
+  const Icon = nodeIcons[node.name] || nodeIcons.default
+  
+  // Check if this node is expanded
+  const isExpanded = expandedNodes[node.id]
+  
+  // Check if node has children
+  const hasChildren = node.children && node.children.length > 0
+  
+  // Check if this node is the selected one
+  const isSelected = selectedNode?.id === node.id
 
-    // Skip the root node but show its children
-    // if (depth === 0 && node.id === '$root') {
-    //   return renderHierarchy(node.children || [], depth, selectedNode, setSelectedNode)
-    // }
-
-    // Safely get children
-    const children = node.children || []
-    const hasChildren = Array.isArray(children) && children.length > 0
-    const isSelected = selectedNode?.id === node.id
-    const Icon = nodeIcons[node.name] || nodeIcons.default
-
-    return (
-      <div key={node.id}>
-        <div
-          className={cls('anodes-item', {
-            'anodes-item-indent': depth > 0,
-            selected: isSelected,
-          })}
-          style={{ marginLeft: depth * 20 }}
-          onClick={() => setSelectedNode(node)}
-        >
-          <Icon size={14} />
-          <span>{node.id === '$root' ? 'app' : node.id}</span>
+  return (
+    <div key={node.id}>
+      <div
+        className={cls('anodes-item', {
+          'anodes-item-indent': depth > 0,
+          selected: isSelected,
+        })}
+        style={{ marginLeft: depth * 20 }}
+        onClick={() => setSelectedNode(node)}
+      >
+        <div style={{ width: 16, display: 'flex', justifyContent: 'center' }}>
+          {hasChildren && (
+            <ChevronDown 
+              size={14} 
+              className={cls('chevron', { expanded: isExpanded })} 
+              onClick={(e) => toggleNode(node.id, e)}
+              style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            />
+          )}
         </div>
-        {hasChildren && renderHierarchy(children, depth + 1, selectedNode, setSelectedNode)}
+        <div className="icon-container">
+          <Icon size={14} />
+        </div>
+        <span>
+          {node.id === '$root' ? 'app' : node.id}
+          <span className="node-type">{node.name !== 'group' ? node.name : ''}</span>
+        </span>
       </div>
-    )
-  })
+      
+      {/* Render children if expanded */}
+      {isExpanded && hasChildren && node.children.map(child => 
+        renderHierarchy(child, depth + 1, selectedNode, setSelectedNode, expandedNodes, toggleNode)
+      )}
+    </div>
+  )
 }
 
 function PlayerPane({ world, player }) {
